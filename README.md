@@ -29,7 +29,7 @@ below runs the current backend locally.
 ## How the app works
 
 `app/main.py` creates the FastAPI application and registers the health router
-from `app/api/health.py`. When a client sends `GET /health`, FastAPI calls the
+from `app/routers/health.py`. When a client sends `GET /health`, FastAPI calls the
 health function and returns `{"status": "healthy"}` as JSON.
 
 This endpoint is a basic check that the API can respond. It does not yet check
@@ -110,7 +110,7 @@ environment and can import the `app` package.
 ```text
 app/
   main.py           # FastAPI application and router registration
-  api/health.py     # GET /health endpoint
+  routers/health.py # GET /health endpoint
   schemas/          # Package for data schemas
   services/         # Package for application services
 tests/
