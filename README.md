@@ -219,12 +219,12 @@ environment and can import the `app` package.
 ```text
 app/
   main.py                    # Composition root: create_app(), lifespan (owns resources)
-  core/                      # Cross-cutting infrastructure
+  core/                      # Cross-cutting infrastructure (depends on nothing else in app/)
     config.py                #   Settings loaded from env / .env (pydantic-settings)
     logging_setup.py         #   Sends app.* logs to the terminal at LOG_LEVEL
-    exception_handlers.py    #   Maps LLM errors to safe HTTP responses (logs metadata only)
   api/                       # Web layer
     dependencies.py          #   FastAPI dependencies for app-owned resources (get_llm_provider)
+    exception_handlers.py    #   Maps LLM errors to safe HTTP responses (logs metadata only)
     routers/
       health.py              #   GET /health
       chat.py                #   POST /api/v1/chat
@@ -243,6 +243,7 @@ app/
 tests/                       # Mirrors app/
   conftest.py                # App/client fixtures with explicit settings; blocks reading .env
   test_app_lifecycle.py      # Lifespan: provider creation, isolation, shutdown, overrides
+  test_architecture.py       # Enforces the package dependency rules below
   api/
     test_chat.py             #   Chat API, validation, error mapping and logs
     test_health.py           #   Health check
@@ -259,6 +260,16 @@ pyproject.toml               # Project metadata, dependencies and pytest setting
 uv.lock                      # Locked dependency versions
 ```
 
-Dependencies point one way: `api` → `llm` / `schemas` → `core`. Inside `llm`,
-providers depend only on `types` and `errors`, and `factory` depends on the
-providers, so there are no circular imports.
+Package dependency rules (each package may import only from the ones listed):
+
+| Package | May import from |
+| --- | --- |
+| `core` | nothing else in `app/` |
+| `schemas` | `core` |
+| `llm` | `core` (inside it, `providers/` only use `llm.types` and `llm.errors`) |
+| `services` | `core`, `llm`, `schemas` |
+| `api` | `core`, `llm`, `schemas`, `services` |
+| `main.py` | everything (it wires the app together) |
+
+So dependencies point one way and there are no cycles. `tests/test_architecture.py`
+enforces these rules; when you add a package, add its rule there.
