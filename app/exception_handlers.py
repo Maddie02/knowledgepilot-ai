@@ -1,0 +1,43 @@
+import logging
+
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+
+from app.services.llm import (
+    LLMConfigurationError,
+    LLMError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
+
+logger = logging.getLogger(__name__)
+
+NOT_CONFIGURED = "LLM provider is not configured"
+TIMED_OUT = "LLM provider timed out"
+BUSY = "LLM provider is busy, try again later"
+PROVIDER_ERROR = "LLM provider error"
+
+
+def _error_response(exc: LLMError) -> tuple[int, str]:
+    if isinstance(exc, LLMConfigurationError):
+        return status.HTTP_503_SERVICE_UNAVAILABLE, NOT_CONFIGURED
+    if isinstance(exc, LLMTimeoutError):
+        return status.HTTP_504_GATEWAY_TIMEOUT, TIMED_OUT
+    if isinstance(exc, LLMRateLimitError):
+        return status.HTTP_503_SERVICE_UNAVAILABLE, BUSY
+    return status.HTTP_502_BAD_GATEWAY, PROVIDER_ERROR
+
+
+async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
+    status_code, detail = _error_response(exc)
+    # The internal message never leaves the server.
+    logger.error("LLM error on %s %s: %s", request.method, request.url.path, exc)
+
+    headers = {}
+    if isinstance(exc, LLMRateLimitError) and exc.retry_after:
+        headers["Retry-After"] = exc.retry_after
+    return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(LLMError, llm_error_handler)

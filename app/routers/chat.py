@@ -2,7 +2,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
+from app.schemas.chat import ChatRequest, ChatResponse, ErrorResponse, TokenUsage
 from app.services.llm import LLMService, get_llm_service
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
@@ -21,11 +22,36 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
                 "or the body contains unknown fields."
             ),
         },
+        status.HTTP_502_BAD_GATEWAY: {
+            "model": ErrorResponse,
+            "description": f"The provider failed or returned an error (`{PROVIDER_ERROR}`).",
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": (
+                f"The provider is not configured or rejected the credentials/model "
+                f"(`{NOT_CONFIGURED}`), or it is rate limiting (`{BUSY}`, may include "
+                "a `Retry-After` header)."
+            ),
+        },
+        status.HTTP_504_GATEWAY_TIMEOUT: {
+            "model": ErrorResponse,
+            "description": f"The provider did not respond in time (`{TIMED_OUT}`).",
+        },
     },
 )
-def chat(
+async def chat(
     request: ChatRequest,
     llm: Annotated[LLMService, Depends(get_llm_service)],
 ) -> ChatResponse:
-    reply = llm.generate(request.message)
-    return ChatResponse(reply=reply, model=llm.model_name)
+    result = await llm.generate(request.message)
+    usage = (
+        TokenUsage(
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            total_tokens=result.usage.total_tokens,
+        )
+        if result.usage
+        else None
+    )
+    return ChatResponse(reply=result.text, model=result.model, usage=usage)
