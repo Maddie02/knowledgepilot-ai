@@ -74,6 +74,35 @@ The health check returns:
 The current health-check endpoint does not require an API key or a database.
 Press `Ctrl+C` in the terminal to stop the server.
 
+## Chat API
+
+`POST /api/v1/chat` accepts a message and returns a reply. It currently uses a
+deterministic mock model (`MockLLMService`), so no API key or network access is
+needed and the same input always produces the same output.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is our vacation policy?"}'
+```
+
+```json
+{"reply": "Mock response to: What is our vacation policy?", "model": "mock-llm"}
+```
+
+Request rules (violations return `422 Unprocessable Content`):
+
+- `message` is required and must be a string.
+- Leading and trailing whitespace is removed; the result must be 1–4000
+  characters, so empty or whitespace-only messages are rejected.
+- Unknown fields are rejected.
+- The body must be valid JSON.
+
+The route in `app/routers/chat.py` only validates input and delegates to an
+`LLMService` provided via FastAPI dependency injection (`get_llm_service` in
+`app/services/llm.py`). A real provider can replace the mock there without
+changing the route or the API contract.
+
 ## Commands
 
 The `Makefile` plays a similar role to the `scripts` section of `package.json`:
@@ -111,10 +140,12 @@ environment and can import the `app` package.
 app/
   main.py           # FastAPI application and router registration
   routers/health.py # GET /health endpoint
-  schemas/          # Package for data schemas
-  services/         # Package for application services
+  routers/chat.py   # POST /api/v1/chat endpoint
+  schemas/chat.py   # Chat request/response models
+  services/llm.py   # LLM service interface and mock implementation
 tests/
   test_health.py    # Health-check test
+  test_chat.py      # Chat API tests
 Makefile            # Development command shortcuts
 pyproject.toml      # Project metadata and dependencies
 uv.lock             # Locked dependency versions
