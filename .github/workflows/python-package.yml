@@ -1,4 +1,5 @@
-# Lint and test with the same tools and locked dependencies used locally (see Makefile).
+# Lint, format-check, type-check and test with the same tools and locked
+# dependencies used locally (`make check` runs the same steps).
 
 name: CI
 
@@ -16,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job name `test` is a required status check on `main`; rename it there too.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -34,8 +36,18 @@ jobs:
         run: uv sync --locked
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . --output-format=github
 
-      - name: Test
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Test with coverage
         # Tests always use the mock LLM; `live` tests are excluded via pyproject.toml.
-        run: uv run python -m pytest
+        # Fails if coverage drops below fail_under in pyproject.toml.
+        run: >-
+          uv run python -m pytest
+          --cov --cov-report=term
+          --cov-report=markdown-append:$GITHUB_STEP_SUMMARY

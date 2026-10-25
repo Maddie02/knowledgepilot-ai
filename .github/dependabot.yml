@@ -1,0 +1,31 @@
+# Weekly dependency updates, grouped to keep the number of PRs small.
+# Security updates are raised separately and immediately by Dependabot.
+
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[deps]"
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "[ci]"
+    groups:
+      github-actions:
+        patterns: ["*"]
