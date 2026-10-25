@@ -87,7 +87,9 @@ class OpenAIProvider:
 
         text = response.output_text
         if not text:
-            logger.warning("LLM returned no text (status=%s)", getattr(response, "status", None))
+            logger.warning(
+                "LLM returned no text (status=%s)", getattr(response, "status", None)
+            )
             raise LLMProviderError("Provider returned an empty response")
 
         usage = None
@@ -129,7 +131,9 @@ class OpenAIProvider:
         if isinstance(exc, APITimeoutError):
             return LLMTimeoutError("Provider request timed out")
         if isinstance(exc, (AuthenticationError, PermissionDeniedError, NotFoundError)):
-            return LLMConfigurationError(f"Provider rejected configuration ({status_code})")
+            return LLMConfigurationError(
+                f"Provider rejected configuration ({status_code})"
+            )
         if isinstance(exc, RateLimitError):
             return LLMRateLimitError(
                 "Provider rate limit reached",

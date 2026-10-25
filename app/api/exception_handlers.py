@@ -41,7 +41,9 @@ async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
     headers = {}
     if isinstance(exc, LLMRateLimitError) and exc.retry_after:
         headers["Retry-After"] = exc.retry_after
-    return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
+    return JSONResponse(
+        status_code=status_code, content={"detail": detail}, headers=headers
+    )
 
 
 def register_exception_handlers(app: FastAPI) -> None:

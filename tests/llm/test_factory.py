@@ -25,7 +25,10 @@ def test_mock_provider_is_the_default():
 )
 def test_openai_without_required_config_is_unconfigured(api_key, model, missing):
     settings = Settings(
-        _env_file=None, llm_provider="openai", openai_api_key=api_key, openai_model=model
+        _env_file=None,
+        llm_provider="openai",
+        openai_api_key=api_key,
+        openai_model=model,
     )
 
     provider = build_llm_provider(settings)
@@ -38,7 +41,10 @@ def test_openai_without_required_config_is_unconfigured(api_key, model, missing)
 @pytest.mark.anyio
 async def test_openai_with_full_config_builds_openai_provider():
     settings = Settings(
-        _env_file=None, llm_provider="openai", openai_api_key=SECRET, openai_model="some-model"
+        _env_file=None,
+        llm_provider="openai",
+        openai_api_key=SECRET,
+        openai_model="some-model",
     )
 
     provider = build_llm_provider(settings)

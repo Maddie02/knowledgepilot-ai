@@ -65,7 +65,9 @@ def make_service(handler, **kwargs) -> OpenAIProvider:
         max_retries=0,
         http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
     )
-    return OpenAIProvider(client=client, model=MODEL, system_prompt=SYSTEM_PROMPT, **kwargs)
+    return OpenAIProvider(
+        client=client, model=MODEL, system_prompt=SYSTEM_PROMPT, **kwargs
+    )
 
 
 def error_handler(status_code: int, headers: dict | None = None):
@@ -124,7 +126,9 @@ async def test_usage_is_none_when_provider_omits_it():
 
 
 async def test_empty_output_is_a_provider_error():
-    service = make_service(lambda request: httpx2.Response(200, json=response_body(text="")))
+    service = make_service(
+        lambda request: httpx2.Response(200, json=response_body(text=""))
+    )
 
     with pytest.raises(LLMProviderError):
         await service.generate("Hi")
@@ -181,7 +185,9 @@ async def test_errors_do_not_leak_api_key(caplog):
 
 async def test_success_logs_latency_and_token_usage(caplog):
     caplog.set_level(logging.INFO, logger="app")
-    service = make_service(lambda request: httpx2.Response(200, json=response_body(usage=USAGE)))
+    service = make_service(
+        lambda request: httpx2.Response(200, json=response_body(usage=USAGE))
+    )
 
     await service.generate("Hi")
 

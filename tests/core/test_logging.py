@@ -18,10 +18,13 @@ def app_logger():
 def test_info_logs_are_emitted(app_logger, capsys):
     configure_logging("INFO")
 
-    logging.getLogger("app.llm.providers.openai").info("LLM request completed latency_ms=12")
+    logging.getLogger("app.llm.providers.openai").info(
+        "LLM request completed latency_ms=12"
+    )
 
-    assert "INFO      app.llm.providers.openai - LLM request completed latency_ms=12" in (
-        capsys.readouterr().err
+    assert (
+        "INFO      app.llm.providers.openai - LLM request completed latency_ms=12"
+        in (capsys.readouterr().err)
     )
 
 
@@ -42,4 +45,3 @@ def test_configure_logging_is_idempotent(app_logger):
 
     assert len(app_logger.handlers) == 1
     assert app_logger.level == logging.DEBUG
-

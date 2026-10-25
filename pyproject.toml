@@ -18,6 +18,10 @@ dev = [
     "ruff>=0.16.10",
 ]
 
+[tool.ruff.format]
+# Keep hand-aligned code examples in docs as written.
+exclude = ["*.md"]
+
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"
 markers = [

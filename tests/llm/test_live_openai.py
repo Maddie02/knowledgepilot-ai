@@ -13,11 +13,15 @@ pytestmark = [pytest.mark.live, pytest.mark.anyio]
 
 settings = Settings(llm_provider="openai")
 has_credentials = bool(
-    settings.openai_api_key and settings.openai_api_key.get_secret_value() and settings.openai_model
+    settings.openai_api_key
+    and settings.openai_api_key.get_secret_value()
+    and settings.openai_model
 )
 
 
-@pytest.mark.skipif(not has_credentials, reason="OPENAI_API_KEY and OPENAI_MODEL not set")
+@pytest.mark.skipif(
+    not has_credentials, reason="OPENAI_API_KEY and OPENAI_MODEL not set"
+)
 async def test_real_provider_returns_text_and_usage():
     service = OpenAIProvider.from_settings(settings)
     try:
