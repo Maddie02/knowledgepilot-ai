@@ -5,10 +5,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.exception_handlers import register_exception_handlers
 from app.api.routers.chat import router as chat_router
 from app.api.routers.health import router as health_router
 from app.core.config import Settings, get_settings
-from app.core.exception_handlers import register_exception_handlers
 from app.core.logging_setup import configure_logging
 from app.llm import build_llm_provider
 
