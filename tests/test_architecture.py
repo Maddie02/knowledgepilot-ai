@@ -27,7 +27,7 @@ LLM_PROVIDER_ALLOWED = {"app.llm.types", "app.llm.errors"}
 
 def imported_app_modules(path: Path) -> set[str]:
     """All `app.*` modules imported by a file, including imports inside functions."""
-    modules = set()
+    modules: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)

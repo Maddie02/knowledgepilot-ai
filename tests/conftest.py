@@ -34,7 +34,7 @@ def make_app(clean_env) -> Callable[..., FastAPI]:
 
 
 @pytest.fixture
-def app(make_app) -> FastAPI:
+def app(make_app: Callable[..., FastAPI]) -> FastAPI:
     return make_app()
 
 

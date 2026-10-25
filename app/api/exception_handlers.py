@@ -28,8 +28,14 @@ def _error_response(exc: LLMError) -> tuple[int, str]:
     return status.HTTP_502_BAD_GATEWAY, PROVIDER_ERROR
 
 
-async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
+async def llm_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Starlette types handlers as taking any Exception; this one is only
+    # registered for LLMError (see register_exception_handlers).
+    if not isinstance(exc, LLMError):
+        raise exc
+
     status_code, detail = _error_response(exc)
+    # Fixed fields only: never log the exception message (it is free text).
     logger.warning(
         "LLM request failed method=%s path=%s error=%s status_code=%s",
         request.method,
@@ -38,7 +44,7 @@ async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
         status_code,
     )
 
-    headers = {}
+    headers: dict[str, str] = {}
     if isinstance(exc, LLMRateLimitError) and exc.retry_after:
         headers["Retry-After"] = exc.retry_after
     return JSONResponse(

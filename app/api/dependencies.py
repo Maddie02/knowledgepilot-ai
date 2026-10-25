@@ -13,4 +13,5 @@ def get_llm_provider(request: Request) -> LLMProvider:
     gets its own provider, and shutdown closes it. Tests can still replace it
     with `app.dependency_overrides[get_llm_provider]`.
     """
-    return request.app.state.llm_provider
+    provider: LLMProvider = request.app.state.llm_provider
+    return provider

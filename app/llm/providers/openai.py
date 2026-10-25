@@ -6,6 +6,7 @@ Python 3 imports are absolute, and this module's own name is `app.llm.providers.
 
 import logging
 import time
+from typing import Any
 
 from openai import (
     APIStatusError,
@@ -68,7 +69,7 @@ class OpenAIProvider:
         )
 
     async def generate(self, message: str) -> LLMResult:
-        params: dict = {
+        params: dict[str, Any] = {
             "model": self._model,
             "instructions": self._system_prompt,
             "input": message,
