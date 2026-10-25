@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.core.config import Settings
 from app.main import create_app
 
 
@@ -22,7 +22,7 @@ def no_env_settings(monkeypatch):
 
 
 @pytest.fixture
-def make_app() -> Callable[..., FastAPI]:
+def make_app(clean_env) -> Callable[..., FastAPI]:
     """Build an app with explicit settings (mock provider unless overridden)."""
 
     def factory(**overrides) -> FastAPI:
@@ -46,3 +46,24 @@ def client(app) -> Iterator[TestClient]:
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+SETTINGS_ENV_VARS = [
+    "LLM_PROVIDER",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "OPENAI_BASE_URL",
+    "LLM_TIMEOUT_SECONDS",
+    "LLM_MAX_RETRIES",
+    "LLM_SYSTEM_PROMPT",
+    "LLM_TEMPERATURE",
+    "LLM_MAX_OUTPUT_TOKENS",
+    "LOG_LEVEL",
+]
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """Ignore any settings exported in the developer's shell (for Settings() tests)."""
+    for name in SETTINGS_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)

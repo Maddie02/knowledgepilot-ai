@@ -1,11 +1,11 @@
 import logging
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app.dependencies import get_llm_service
-from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
-from app.schemas.chat import MAX_MESSAGE_LENGTH
-from app.services.llm import (
+from app.api.dependencies import get_llm_provider
+from app.core.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
+from app.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRateLimitError,
@@ -13,6 +13,7 @@ from app.services.llm import (
     LLMTimeoutError,
     LLMUsage,
 )
+from app.schemas.chat import MAX_MESSAGE_LENGTH
 
 CHAT_URL = "/api/v1/chat"
 
@@ -78,7 +79,7 @@ def test_malformed_json_is_rejected(client):
 
 
 def test_route_delegates_to_injected_service(app, client):
-    class FakeLLMService:
+    class FakeProvider:
         async def generate(self, message: str) -> LLMResult:
             return LLMResult(
                 text=message.upper(),
@@ -86,7 +87,7 @@ def test_route_delegates_to_injected_service(app, client):
                 usage=LLMUsage(input_tokens=3, output_tokens=2, total_tokens=5),
             )
 
-    app.dependency_overrides[get_llm_service] = FakeLLMService
+    app.dependency_overrides[get_llm_provider] = FakeProvider
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -115,11 +116,11 @@ SECRET = "sk-super-secret-value"
 def test_provider_errors_map_to_safe_responses_and_logs(
     error, expected_status, expected_detail, app, client, caplog
 ):
-    class FailingLLMService:
+    class FailingProvider:
         async def generate(self, message: str) -> LLMResult:
             raise error
 
-    app.dependency_overrides[get_llm_service] = FailingLLMService
+    app.dependency_overrides[get_llm_provider] = FailingProvider
     caplog.set_level(logging.DEBUG, logger="app")
 
     response = client.post(CHAT_URL, json={"message": "hello"})
@@ -137,11 +138,11 @@ def test_provider_errors_map_to_safe_responses_and_logs(
 
 
 def test_rate_limit_forwards_retry_after(app, client):
-    class RateLimitedLLMService:
+    class RateLimitedProvider:
         async def generate(self, message: str) -> LLMResult:
             raise LLMRateLimitError("429", retry_after="20")
 
-    app.dependency_overrides[get_llm_service] = RateLimitedLLMService
+    app.dependency_overrides[get_llm_provider] = RateLimitedProvider
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -172,3 +173,15 @@ def test_openapi_documents_chat_schemas(client):
         "output_tokens",
         "total_tokens",
     }
+
+
+def test_unconfigured_provider_returns_safe_503_and_health_still_works(make_app):
+    app = make_app(llm_provider="openai", openai_model="some-model")  # no API key
+
+    with TestClient(app) as client:
+        chat = client.post(CHAT_URL, json={"message": "hello"})
+        health = client.get("/health")
+
+    assert chat.status_code == 503
+    assert chat.json() == {"detail": NOT_CONFIGURED}
+    assert health.status_code == 200

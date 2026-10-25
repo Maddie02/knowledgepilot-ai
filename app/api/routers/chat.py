@@ -2,10 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.dependencies import get_llm_service
-from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
+from app.api.dependencies import get_llm_provider
+from app.core.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
+from app.llm import LLMProvider
 from app.schemas.chat import ChatRequest, ChatResponse, ErrorResponse, TokenUsage
-from app.services.llm import LLMService
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 )
 async def chat(
     request: ChatRequest,
-    llm: Annotated[LLMService, Depends(get_llm_service)],
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
 ) -> ChatResponse:
     result = await llm.generate(request.message)
     usage = (

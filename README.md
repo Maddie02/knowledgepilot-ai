@@ -32,13 +32,13 @@ backend locally.
 `app/main.py` builds the FastAPI application in `create_app()` and registers the
 health and chat routers. `GET /health` returns `{"status": "healthy"}` and does
 not call any external service. `POST /api/v1/chat` validates the request and
-passes the message to the configured LLM service (see [Chat API](#chat-api)).
+passes the message to the configured LLM provider (see [Chat API](#chat-api)).
 
 The application owns its resources through FastAPI's *lifespan*: at startup it
-reads the settings, creates the LLM service and stores it on `app.state`; at
+reads the settings, creates the LLM provider and stores it on `app.state`; at
 shutdown it closes it (including the provider's HTTP connection pool). Routes
-receive the service through the `get_llm_service` dependency in
-`app/dependencies.py`. Future clients (databases, vector stores) follow the
+receive the provider through the `get_llm_provider` dependency in
+`app/api/dependencies.py`. Future clients (databases, vector stores) follow the
 same pattern.
 
 The tests use FastAPI's `TestClient` to call the application without starting a
@@ -84,7 +84,7 @@ Press `Ctrl+C` in the terminal to stop the server.
 ## Chat API
 
 `POST /api/v1/chat` accepts a message and returns a reply from the configured
-LLM provider. By default it uses a deterministic mock model (`MockLLMService`),
+LLM provider. By default it uses a deterministic mock model (`MockProvider`),
 so no API key or network access is needed and the same input always produces
 the same output. See [Configuration](#configuration) to use a real model.
 
@@ -130,10 +130,10 @@ error type, HTTP status and provider request ID.
 | Provider did not respond within the timeout | `504` | `LLM provider timed out` |
 | Any other provider or connection error | `502` | `LLM provider error` |
 
-The route in `app/routers/chat.py` only validates input and delegates to an
-`LLMService` provided via FastAPI dependency injection (`get_llm_service` in
-`app/dependencies.py`). All OpenAI SDK code lives in
-`app/services/openai_llm.py`.
+The route in `app/api/routers/chat.py` only validates input and delegates to an
+`LLMProvider` supplied via FastAPI dependency injection (`get_llm_provider` in
+`app/api/dependencies.py`). All OpenAI SDK code lives in
+`app/llm/providers/openai.py`.
 
 ## Configuration
 
@@ -173,7 +173,7 @@ The worst-case response time is roughly
 
 Each successful request logs the model, latency and token counts in the server
 terminal, e.g.
-`INFO      app.services.openai_llm - LLM request completed model=... latency_ms=840 input_tokens=42 output_tokens=120`.
+`INFO      app.llm.providers.openai - LLM request completed model=... latency_ms=840 input_tokens=42 output_tokens=120`.
 At startup the server also logs which provider and model it uses, or a warning
 if required settings are missing. Logs never include the API key or provider
 error messages.
@@ -218,27 +218,47 @@ environment and can import the `app` package.
 
 ```text
 app/
-  main.py               # create_app(), lifespan (owns resources), router/error-handler registration
-  config.py             # Settings loaded from env / .env (pydantic-settings)
-  dependencies.py       # FastAPI dependencies exposing app-owned resources (get_llm_service)
-  logging_config.py     # Sends app.* logs to the terminal at LOG_LEVEL
-  exception_handlers.py # Maps LLM errors to safe HTTP responses (logs metadata only)
-  routers/health.py     # GET /health endpoint
-  routers/chat.py       # POST /api/v1/chat endpoint
-  schemas/chat.py       # Chat request/response models
-  services/llm.py       # LLM interface, result/error types, mock, service factory
-  services/openai_llm.py # OpenAI Responses API implementation
-tests/
-  conftest.py           # App/client fixtures with explicit settings; blocks reading .env
-  test_app_lifecycle.py # Lifespan: service creation, isolation, shutdown, overrides
-  test_health.py        # Health-check test
-  test_chat.py          # Chat API and error-mapping tests
-  test_config.py        # Settings and provider-selection tests
-  test_openai_llm.py    # OpenAI service tests using a mocked HTTP transport
-  test_live_openai.py   # Optional live smoke test (marker: live)
-  test_logging.py       # Logging configuration tests
-.env.example            # Configuration template (placeholders only)
-Makefile                # Development command shortcuts
-pyproject.toml          # Project metadata, dependencies and pytest settings
-uv.lock                 # Locked dependency versions
+  main.py                    # Composition root: create_app(), lifespan (owns resources)
+  core/                      # Cross-cutting infrastructure
+    config.py                #   Settings loaded from env / .env (pydantic-settings)
+    logging_setup.py         #   Sends app.* logs to the terminal at LOG_LEVEL
+    exception_handlers.py    #   Maps LLM errors to safe HTTP responses (logs metadata only)
+  api/                       # Web layer
+    dependencies.py          #   FastAPI dependencies for app-owned resources (get_llm_provider)
+    routers/
+      health.py              #   GET /health
+      chat.py                #   POST /api/v1/chat
+  schemas/
+    chat.py                  # Request/response models (DTOs)
+  llm/                       # LLM integration
+    __init__.py              #   Public API - import from `app.llm`, not submodules
+    types.py                 #   LLMProvider interface (Protocol), LLMResult, LLMUsage
+    errors.py                #   Provider-neutral LLMError hierarchy
+    factory.py               #   build_llm_provider(settings): picks the implementation
+    providers/
+      mock.py                #   MockProvider (deterministic, no network)
+      unconfigured.py        #   UnconfiguredProvider (missing config -> 503)
+      openai.py              #   OpenAIProvider (only module that imports the openai SDK)
+  services/                  # Business logic (empty for now; e.g. RAG orchestration later)
+tests/                       # Mirrors app/
+  conftest.py                # App/client fixtures with explicit settings; blocks reading .env
+  test_app_lifecycle.py      # Lifespan: provider creation, isolation, shutdown, overrides
+  api/
+    test_chat.py             #   Chat API, validation, error mapping and logs
+    test_health.py           #   Health check
+  core/
+    test_config.py           #   Settings loading, masking and validation
+    test_logging.py          #   Logging configuration
+  llm/
+    test_factory.py          #   Provider selection
+    test_openai_provider.py  #   OpenAI provider over a mocked HTTP transport
+    test_live_openai.py      #   Optional live smoke test (marker: live)
+.env.example                 # Configuration template (placeholders only)
+Makefile                     # Development command shortcuts
+pyproject.toml               # Project metadata, dependencies and pytest settings
+uv.lock                      # Locked dependency versions
 ```
+
+Dependencies point one way: `api` → `llm` / `schemas` → `core`. Inside `llm`,
+providers depend only on `types` and `errors`, and `factory` depends on the
+providers, so there are no circular imports.
