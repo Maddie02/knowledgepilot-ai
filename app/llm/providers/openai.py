@@ -6,6 +6,7 @@ Python 3 imports are absolute, and this module's own name is `app.llm.providers.
 
 import logging
 import time
+from typing import Any
 
 from openai import (
     APIStatusError,
@@ -68,7 +69,7 @@ class OpenAIProvider:
         )
 
     async def generate(self, message: str) -> LLMResult:
-        params: dict = {
+        params: dict[str, Any] = {
             "model": self._model,
             "instructions": self._system_prompt,
             "input": message,
@@ -87,7 +88,9 @@ class OpenAIProvider:
 
         text = response.output_text
         if not text:
-            logger.warning("LLM returned no text (status=%s)", getattr(response, "status", None))
+            logger.warning(
+                "LLM returned no text (status=%s)", getattr(response, "status", None)
+            )
             raise LLMProviderError("Provider returned an empty response")
 
         usage = None
@@ -129,7 +132,9 @@ class OpenAIProvider:
         if isinstance(exc, APITimeoutError):
             return LLMTimeoutError("Provider request timed out")
         if isinstance(exc, (AuthenticationError, PermissionDeniedError, NotFoundError)):
-            return LLMConfigurationError(f"Provider rejected configuration ({status_code})")
+            return LLMConfigurationError(
+                f"Provider rejected configuration ({status_code})"
+            )
         if isinstance(exc, RateLimitError):
             return LLMRateLimitError(
                 "Provider rate limit reached",

@@ -14,9 +14,37 @@ dependencies = [
 dev = [
     "httpx>=0.28.1",
     "httpx2>=2.13.1",
+    "mypy>=2.4.0",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.10",
 ]
+
+[tool.mypy]
+strict = true
+files = ["app", "tests"]
+plugins = ["pydantic.mypy"]
+# Name modules by path (tests.api.test_chat) so overrides can target tests.*
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# Tests may omit annotations on test functions and fixtures; calls are still checked.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 95
+
+[tool.ruff.format]
+# Keep hand-aligned code examples in docs as written.
+exclude = ["*.md"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"

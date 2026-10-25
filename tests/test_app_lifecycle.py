@@ -40,7 +40,10 @@ def test_shutdown_closes_the_provider(make_app, monkeypatch):
     app = make_app()
 
     with TestClient(app) as client:
-        assert client.post("/api/v1/chat", json={"message": "hi"}).json()["reply"] == "tracked"
+        assert (
+            client.post("/api/v1/chat", json={"message": "hi"}).json()["reply"]
+            == "tracked"
+        )
         assert not provider.closed
 
     assert provider.closed

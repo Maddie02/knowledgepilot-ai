@@ -26,13 +26,15 @@ def make_app(clean_env) -> Callable[..., FastAPI]:
     """Build an app with explicit settings (mock provider unless overridden)."""
 
     def factory(**overrides) -> FastAPI:
-        return create_app(Settings(_env_file=None, **{"llm_provider": "mock", **overrides}))
+        return create_app(
+            Settings(_env_file=None, **{"llm_provider": "mock", **overrides})
+        )
 
     return factory
 
 
 @pytest.fixture
-def app(make_app) -> FastAPI:
+def app(make_app: Callable[..., FastAPI]) -> FastAPI:
     return make_app()
 
 

@@ -25,6 +25,7 @@ def test_reads_values_from_env_file(tmp_path):
     settings = Settings(_env_file=env_file)
 
     assert settings.llm_provider == "openai"
+    assert settings.openai_api_key is not None
     assert settings.openai_api_key.get_secret_value() == SECRET
     assert settings.openai_model == "some-model"
     assert settings.llm_timeout_seconds == 12.5

@@ -208,7 +208,13 @@ Run these from the project root:
 | `make start` | Start the server without automatic reload |
 | `make test` | Run the automated tests (never calls a real provider) |
 | `make test-live` | Run the live smoke test against the provider in `.env` (costs money) |
+| `make coverage` | Run the tests with branch coverage (fails below 95%) |
 | `make lint` | Check the code with Ruff |
+| `make format` | Format the code with Ruff (rewrites files) |
+| `make typecheck` | Type-check with mypy (strict for `app/`) |
+| `make check` | Run everything CI runs: lint, format check, type check, tests with coverage |
+
+Run `make check` before pushing; if it passes locally, CI passes too.
 
 If Make is unavailable, run the underlying commands directly:
 
@@ -216,11 +222,25 @@ If Make is unavailable, run the underlying commands directly:
 uv run uvicorn app.main:app --reload
 uv run uvicorn app.main:app
 uv run python -m pytest
+uv run python -m pytest --cov --cov-report=term
 uv run ruff check .
+uv run ruff format .
+uv run mypy
 ```
 
 Use `make test` or `uv run python -m pytest` to ensure tests use the project
 environment and can import the `app` package.
+
+## CI and repository automation
+
+| What | Where | Runs |
+| --- | --- | --- |
+| CI: lint, format check, type check, tests with coverage | `.github/workflows/python-package.yml` | every PR and push to `main` |
+| CodeQL security analysis (Python and workflows) | `.github/workflows/codeql.yml` | every PR, push to `main`, weekly |
+| Dependency updates (uv packages, GitHub Actions) | `.github/dependabot.yml` | weekly, grouped PRs |
+
+`main` is protected: changes go through pull requests and the CI `test` check must
+pass before merging. Coverage is shown in each CI run's summary.
 
 ## Project layout
 

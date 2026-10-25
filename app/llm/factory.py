@@ -16,7 +16,9 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
         logger.info("Using LLM provider=mock")
         return MockProvider()
 
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""
+    api_key = (
+        settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""
+    )
     required = {"OPENAI_API_KEY": api_key, "OPENAI_MODEL": settings.openai_model or ""}
     missing = [name for name, value in required.items() if not value.strip()]
     if missing:

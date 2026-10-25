@@ -106,11 +106,18 @@ SECRET = "sk-super-secret-value"
     ("error", "expected_status", "expected_detail"),
     [
         pytest.param(
-            LLMConfigurationError(f"bad key {SECRET}"), 503, NOT_CONFIGURED, id="configuration"
+            LLMConfigurationError(f"bad key {SECRET}"),
+            503,
+            NOT_CONFIGURED,
+            id="configuration",
         ),
-        pytest.param(LLMTimeoutError(f"timeout {SECRET}"), 504, TIMED_OUT, id="timeout"),
+        pytest.param(
+            LLMTimeoutError(f"timeout {SECRET}"), 504, TIMED_OUT, id="timeout"
+        ),
         pytest.param(LLMRateLimitError(f"429 {SECRET}"), 503, BUSY, id="rate-limit"),
-        pytest.param(LLMProviderError(f"500 {SECRET}"), 502, PROVIDER_ERROR, id="provider"),
+        pytest.param(
+            LLMProviderError(f"500 {SECRET}"), 502, PROVIDER_ERROR, id="provider"
+        ),
     ],
 )
 def test_provider_errors_map_to_safe_responses_and_logs(
