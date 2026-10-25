@@ -47,6 +47,14 @@ the fixtures in `tests/conftest.py`, so a local `.env` is never read during
 tests (a guard fails any test that tries). They always use the mock model or a
 mocked HTTP transport, so they never make paid requests.
 
+### Architecture decisions
+
+The reasoning behind the main design choices - the provider-neutral LLM
+abstraction, factories and the application lifecycle, the package structure and
+its dependency rules, and the testing strategy - is recorded as Architecture
+Decision Records in [`docs/adr/`](docs/adr/README.md). Read them before changing
+one of those areas, and add a new ADR when you make a decision of similar weight.
+
 ## Requirements
 
 - Python 3.13 or newer (the project pins Python 3.13 in `.python-version`)
