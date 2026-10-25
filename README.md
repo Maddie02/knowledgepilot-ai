@@ -22,23 +22,21 @@ workflows in one place. The planned capabilities are:
 ## Current status
 
 The project currently contains a FastAPI backend with a health-check endpoint
-and an automated test. Document upload, AI answers with sources, and agent-based
-workflow automation are planned features and are not implemented yet. The setup
-below runs the current backend locally.
+and a chat endpoint that can call an OpenAI model (or a deterministic mock).
+Document upload, answers with sources, and agent-based workflow automation are
+planned features and are not implemented yet. The setup below runs the current
+backend locally.
 
 ## How the app works
 
-`app/main.py` creates the FastAPI application and registers the health router
-from `app/routers/health.py`. When a client sends `GET /health`, FastAPI calls the
-health function and returns `{"status": "healthy"}` as JSON.
+`app/main.py` creates the FastAPI application and registers the health and chat
+routers. `GET /health` returns `{"status": "healthy"}` and does not call any
+external service. `POST /api/v1/chat` validates the request and passes the
+message to the configured LLM service (see [Chat API](#chat-api)).
 
-This endpoint is a basic check that the API can respond. It does not yet check
-external services or run any AI functionality. The current code is the initial
-backend foundation; AI features are not implemented yet.
-
-`tests/test_health.py` uses FastAPI's `TestClient` to call the application without
-starting a separate server. It checks both the HTTP status code (`200`) and the
-JSON response.
+The tests use FastAPI's `TestClient` to call the application without starting a
+separate server. They always use the mock model or a mocked HTTP transport, so
+they never make paid requests.
 
 ## Requirements
 
@@ -76,9 +74,10 @@ Press `Ctrl+C` in the terminal to stop the server.
 
 ## Chat API
 
-`POST /api/v1/chat` accepts a message and returns a reply. It currently uses a
-deterministic mock model (`MockLLMService`), so no API key or network access is
-needed and the same input always produces the same output.
+`POST /api/v1/chat` accepts a message and returns a reply from the configured
+LLM provider. By default it uses a deterministic mock model (`MockLLMService`),
+so no API key or network access is needed and the same input always produces
+the same output. See [Configuration](#configuration) to use a real model.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/chat \
@@ -86,8 +85,21 @@ curl -X POST http://127.0.0.1:8000/api/v1/chat \
   -d '{"message": "What is our vacation policy?"}'
 ```
 
+Mock response:
+
 ```json
-{"reply": "Mock response to: What is our vacation policy?", "model": "mock-llm"}
+{"reply": "Mock response to: What is our vacation policy?", "model": "mock-llm", "usage": null}
+```
+
+With a real provider, `model` is the configured model ID and `usage` contains
+the token counts the provider reported (`null` if it reported none):
+
+```json
+{
+  "reply": "...",
+  "model": "<OPENAI_MODEL>",
+  "usage": {"input_tokens": 42, "output_tokens": 120, "total_tokens": 162}
+}
 ```
 
 Request rules (violations return `422 Unprocessable Content`):
@@ -98,10 +110,68 @@ Request rules (violations return `422 Unprocessable Content`):
 - Unknown fields are rejected.
 - The body must be valid JSON.
 
+Provider failures return a generic message. Provider details, credentials and
+SDK error messages are never sent to the client; the server logs only the
+error type, HTTP status and provider request ID.
+
+| Situation | Status | `detail` |
+| --- | --- | --- |
+| Provider not configured, or key/model rejected | `503` | `LLM provider is not configured` |
+| Provider rate limit or quota (may include `Retry-After`) | `503` | `LLM provider is busy, try again later` |
+| Provider did not respond within the timeout | `504` | `LLM provider timed out` |
+| Any other provider or connection error | `502` | `LLM provider error` |
+
 The route in `app/routers/chat.py` only validates input and delegates to an
 `LLMService` provided via FastAPI dependency injection (`get_llm_service` in
-`app/services/llm.py`). A real provider can replace the mock there without
-changing the route or the API contract.
+`app/services/llm.py`). All OpenAI SDK code lives in
+`app/services/openai_llm.py`.
+
+## Configuration
+
+Settings are read from environment variables and from a `.env` file in the
+project root (environment variables take precedence). Copy the template and
+fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+`.env` is ignored by Git. Never commit real credentials; `.env.example` must only
+contain placeholders.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `mock` | `mock` or `openai` |
+| `OPENAI_API_KEY` | – | Provider API key (required for `openai`) |
+| `OPENAI_MODEL` | – | Model ID to request (required for `openai`) |
+| `OPENAI_BASE_URL` | OpenAI | Optional OpenAI-compatible endpoint |
+| `LLM_TIMEOUT_SECONDS` | `30` | Timeout for each provider request attempt |
+| `LLM_MAX_RETRIES` | `2` | Automatic retries on connection errors, 429 and 5xx |
+| `LLM_SYSTEM_PROMPT` | built-in | System instructions sent with every request |
+| `LLM_TEMPERATURE` | provider default | Sampling temperature (0–2) |
+| `LLM_MAX_OUTPUT_TOKENS` | provider default | Upper limit on generated tokens |
+| `LOG_LEVEL` | `INFO` | Minimum level for application logs (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+
+To use OpenAI, set `LLM_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL`,
+then restart the server. If the provider is `openai` but the key or model is
+missing, the app still starts (so `/health` works) and chat requests return
+`503`.
+
+The worst-case response time is roughly
+`LLM_TIMEOUT_SECONDS × (LLM_MAX_RETRIES + 1)` plus retry back-off.
+
+### Experiments
+
+Each successful request logs the model, latency and token counts in the server
+terminal, e.g.
+`INFO      app.services.openai_llm - LLM request completed model=... latency_ms=840 input_tokens=42 output_tokens=120`.
+At startup the server also logs which provider and model it uses, or a warning
+if required settings are missing. Logs never include the API key or provider
+error messages.
+To compare behaviour, change `LLM_SYSTEM_PROMPT`, `LLM_TEMPERATURE` or
+`LLM_MAX_OUTPUT_TOKENS` in `.env` and restart. Asking about a fictional internal
+procedure (e.g. "What is the approval process for form KP-17?") shows that the
+model has no access to company knowledge and may invent an answer.
 
 ## Commands
 
@@ -119,7 +189,8 @@ Run these from the project root:
 | --- | --- |
 | `make dev` | Start the local server with automatic reload |
 | `make start` | Start the server without automatic reload |
-| `make test` | Run the automated tests |
+| `make test` | Run the automated tests (never calls a real provider) |
+| `make test-live` | Run the live smoke test against the provider in `.env` (costs money) |
 | `make lint` | Check the code with Ruff |
 
 If Make is unavailable, run the underlying commands directly:
@@ -138,15 +209,25 @@ environment and can import the `app` package.
 
 ```text
 app/
-  main.py           # FastAPI application and router registration
-  routers/health.py # GET /health endpoint
-  routers/chat.py   # POST /api/v1/chat endpoint
-  schemas/chat.py   # Chat request/response models
-  services/llm.py   # LLM service interface and mock implementation
+  main.py               # FastAPI app, lifespan, router and error-handler registration
+  config.py             # Settings loaded from env / .env (pydantic-settings)
+  logging_config.py     # Sends app.* logs to the terminal at LOG_LEVEL
+  exception_handlers.py # Maps LLM errors to safe HTTP responses
+  routers/health.py     # GET /health endpoint
+  routers/chat.py       # POST /api/v1/chat endpoint
+  schemas/chat.py       # Chat request/response models
+  services/llm.py       # LLM interface, result/error types, mock, service factory
+  services/openai_llm.py # OpenAI Responses API implementation
 tests/
-  test_health.py    # Health-check test
-  test_chat.py      # Chat API tests
-Makefile            # Development command shortcuts
-pyproject.toml      # Project metadata and dependencies
-uv.lock             # Locked dependency versions
+  conftest.py           # Forces the mock LLM in tests
+  test_health.py        # Health-check test
+  test_chat.py          # Chat API and error-mapping tests
+  test_config.py        # Settings and provider-selection tests
+  test_openai_llm.py    # OpenAI service tests using a mocked HTTP transport
+  test_live_openai.py   # Optional live smoke test (marker: live)
+  test_logging.py       # Logging configuration tests
+.env.example            # Configuration template (placeholders only)
+Makefile                # Development command shortcuts
+pyproject.toml          # Project metadata, dependencies and pytest settings
+uv.lock                 # Locked dependency versions
 ```
