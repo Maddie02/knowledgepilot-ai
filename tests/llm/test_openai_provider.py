@@ -1,4 +1,4 @@
-"""Tests for OpenAILLMService.
+"""Tests for OpenAIProvider.
 
 Requests go through the real `AsyncOpenAI` client, but its HTTP transport is
 replaced with `MockTransport`, so nothing leaves the machine and nothing is billed.
@@ -11,15 +11,15 @@ import httpx2
 import pytest
 from openai import AsyncOpenAI
 
-from app.config import Settings
-from app.services.llm import (
+from app.core.config import Settings
+from app.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRateLimitError,
     LLMTimeoutError,
     LLMUsage,
 )
-from app.services.openai_llm import OpenAILLMService
+from app.llm.providers.openai import OpenAIProvider
 
 pytestmark = pytest.mark.anyio
 
@@ -59,13 +59,13 @@ USAGE = {
 }
 
 
-def make_service(handler, **kwargs) -> OpenAILLMService:
+def make_service(handler, **kwargs) -> OpenAIProvider:
     client = AsyncOpenAI(
         api_key=API_KEY,
         max_retries=0,
         http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
     )
-    return OpenAILLMService(client=client, model=MODEL, system_prompt=SYSTEM_PROMPT, **kwargs)
+    return OpenAIProvider(client=client, model=MODEL, system_prompt=SYSTEM_PROMPT, **kwargs)
 
 
 def error_handler(status_code: int, headers: dict | None = None):
@@ -203,7 +203,7 @@ async def test_from_settings_applies_timeout_retries_and_base_url():
         llm_max_retries=1,
     )
 
-    service = OpenAILLMService.from_settings(settings)
+    service = OpenAIProvider.from_settings(settings)
     try:
         assert service._client.timeout == 5
         assert service._client.max_retries == 1

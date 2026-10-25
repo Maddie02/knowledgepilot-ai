@@ -6,8 +6,8 @@ Excluded from `make test`; run with `make test-live`.
 
 import pytest
 
-from app.config import Settings
-from app.services.openai_llm import OpenAILLMService
+from app.core.config import Settings
+from app.llm.providers.openai import OpenAIProvider
 
 pytestmark = [pytest.mark.live, pytest.mark.anyio]
 
@@ -19,7 +19,7 @@ has_credentials = bool(
 
 @pytest.mark.skipif(not has_credentials, reason="OPENAI_API_KEY and OPENAI_MODEL not set")
 async def test_real_provider_returns_text_and_usage():
-    service = OpenAILLMService.from_settings(settings)
+    service = OpenAIProvider.from_settings(settings)
     try:
         result = await service.generate("Reply with the single word: pong")
     finally:

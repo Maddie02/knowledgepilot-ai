@@ -1,3 +1,9 @@
+"""OpenAI provider. The only module that imports the `openai` SDK.
+
+Note: `from openai import ...` below loads the installed SDK, not this file -
+Python 3 imports are absolute, and this module's own name is `app.llm.providers.openai`.
+"""
+
 import logging
 import time
 
@@ -12,22 +18,21 @@ from openai import (
     RateLimitError,
 )
 
-from app.config import Settings
-from app.services.llm import (
+from app.core.config import Settings
+from app.llm.errors import (
     LLMConfigurationError,
     LLMError,
     LLMProviderError,
     LLMRateLimitError,
-    LLMResult,
     LLMTimeoutError,
-    LLMUsage,
 )
+from app.llm.types import LLMResult, LLMUsage
 
 logger = logging.getLogger(__name__)
 
 
-class OpenAILLMService:
-    """LLM service backed by the OpenAI Responses API."""
+class OpenAIProvider:
+    """LLM provider backed by the OpenAI Responses API."""
 
     def __init__(
         self,
@@ -44,7 +49,7 @@ class OpenAILLMService:
         self._max_output_tokens = max_output_tokens
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "OpenAILLMService":
+    def from_settings(cls, settings: Settings) -> "OpenAIProvider":
         if settings.openai_api_key is None or not settings.openai_model:
             raise LLMConfigurationError("OpenAI API key and model must be configured")
 

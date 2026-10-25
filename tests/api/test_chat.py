@@ -1,25 +1,24 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
-from app.main import app
-from app.schemas.chat import MAX_MESSAGE_LENGTH
-from app.services.llm import (
+from app.api.dependencies import get_llm_provider
+from app.core.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
+from app.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRateLimitError,
     LLMResult,
     LLMTimeoutError,
     LLMUsage,
-    get_llm_service,
 )
-
-client = TestClient(app)
+from app.schemas.chat import MAX_MESSAGE_LENGTH
 
 CHAT_URL = "/api/v1/chat"
 
 
-def test_valid_message_returns_mock_reply():
+def test_valid_message_returns_mock_reply(client):
     response = client.post(CHAT_URL, json={"message": "Hello"})
 
     assert response.status_code == 200
@@ -30,21 +29,21 @@ def test_valid_message_returns_mock_reply():
     }
 
 
-def test_reply_is_deterministic():
+def test_reply_is_deterministic(client):
     first = client.post(CHAT_URL, json={"message": "Same question"})
     second = client.post(CHAT_URL, json={"message": "Same question"})
 
     assert first.json() == second.json()
 
 
-def test_surrounding_whitespace_is_stripped():
+def test_surrounding_whitespace_is_stripped(client):
     response = client.post(CHAT_URL, json={"message": "  Hello  "})
 
     assert response.status_code == 200
     assert response.json()["reply"] == "Mock response to: Hello"
 
 
-def test_message_at_max_length_is_accepted():
+def test_message_at_max_length_is_accepted(client):
     response = client.post(CHAT_URL, json={"message": "a" * MAX_MESSAGE_LENGTH})
 
     assert response.status_code == 200
@@ -62,14 +61,14 @@ def test_message_at_max_length_is_accepted():
         pytest.param({"message": "Hi", "extra": "x"}, id="unknown-field"),
     ],
 )
-def test_invalid_body_is_rejected(body):
+def test_invalid_body_is_rejected(body, client):
     response = client.post(CHAT_URL, json=body)
 
     assert response.status_code == 422
     assert "detail" in response.json()
 
 
-def test_malformed_json_is_rejected():
+def test_malformed_json_is_rejected(client):
     response = client.post(
         CHAT_URL,
         content='{"message": ',
@@ -79,8 +78,8 @@ def test_malformed_json_is_rejected():
     assert response.status_code == 422
 
 
-def test_route_delegates_to_injected_service():
-    class FakeLLMService:
+def test_route_delegates_to_injected_service(app, client):
+    class FakeProvider:
         async def generate(self, message: str) -> LLMResult:
             return LLMResult(
                 text=message.upper(),
@@ -88,7 +87,7 @@ def test_route_delegates_to_injected_service():
                 usage=LLMUsage(input_tokens=3, output_tokens=2, total_tokens=5),
             )
 
-    app.dependency_overrides[get_llm_service] = FakeLLMService
+    app.dependency_overrides[get_llm_provider] = FakeProvider
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -114,12 +113,15 @@ SECRET = "sk-super-secret-value"
         pytest.param(LLMProviderError(f"500 {SECRET}"), 502, PROVIDER_ERROR, id="provider"),
     ],
 )
-def test_provider_errors_map_to_safe_responses(error, expected_status, expected_detail):
-    class FailingLLMService:
+def test_provider_errors_map_to_safe_responses_and_logs(
+    error, expected_status, expected_detail, app, client, caplog
+):
+    class FailingProvider:
         async def generate(self, message: str) -> LLMResult:
             raise error
 
-    app.dependency_overrides[get_llm_service] = FailingLLMService
+    app.dependency_overrides[get_llm_provider] = FailingProvider
+    caplog.set_level(logging.DEBUG, logger="app")
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -127,13 +129,20 @@ def test_provider_errors_map_to_safe_responses(error, expected_status, expected_
     assert response.json() == {"detail": expected_detail}
     assert SECRET not in response.text
 
+    # Logs carry controlled metadata only - never the exception message.
+    assert (
+        f"LLM request failed method=POST path={CHAT_URL} "
+        f"error={type(error).__name__} status_code={expected_status}"
+    ) in caplog.text
+    assert SECRET not in caplog.text
 
-def test_rate_limit_forwards_retry_after():
-    class RateLimitedLLMService:
+
+def test_rate_limit_forwards_retry_after(app, client):
+    class RateLimitedProvider:
         async def generate(self, message: str) -> LLMResult:
             raise LLMRateLimitError("429", retry_after="20")
 
-    app.dependency_overrides[get_llm_service] = RateLimitedLLMService
+    app.dependency_overrides[get_llm_provider] = RateLimitedProvider
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -141,7 +150,7 @@ def test_rate_limit_forwards_retry_after():
     assert response.headers["retry-after"] == "20"
 
 
-def test_openapi_documents_chat_schemas():
+def test_openapi_documents_chat_schemas(client):
     spec = client.get("/openapi.json").json()
     operation = spec["paths"][CHAT_URL]["post"]
     schemas = spec["components"]["schemas"]
@@ -164,3 +173,15 @@ def test_openapi_documents_chat_schemas():
         "output_tokens",
         "total_tokens",
     }
+
+
+def test_unconfigured_provider_returns_safe_503_and_health_still_works(make_app):
+    app = make_app(llm_provider="openai", openai_model="some-model")  # no API key
+
+    with TestClient(app) as client:
+        chat = client.post(CHAT_URL, json={"message": "hello"})
+        health = client.get("/health")
+
+    assert chat.status_code == 503
+    assert chat.json() == {"detail": NOT_CONFIGURED}
+    assert health.status_code == 200
