@@ -1,8 +1,9 @@
-import pytest
-from fastapi.testclient import TestClient
+import logging
 
+import pytest
+
+from app.dependencies import get_llm_service
 from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
-from app.main import app
 from app.schemas.chat import MAX_MESSAGE_LENGTH
 from app.services.llm import (
     LLMConfigurationError,
@@ -11,15 +12,12 @@ from app.services.llm import (
     LLMResult,
     LLMTimeoutError,
     LLMUsage,
-    get_llm_service,
 )
-
-client = TestClient(app)
 
 CHAT_URL = "/api/v1/chat"
 
 
-def test_valid_message_returns_mock_reply():
+def test_valid_message_returns_mock_reply(client):
     response = client.post(CHAT_URL, json={"message": "Hello"})
 
     assert response.status_code == 200
@@ -30,21 +28,21 @@ def test_valid_message_returns_mock_reply():
     }
 
 
-def test_reply_is_deterministic():
+def test_reply_is_deterministic(client):
     first = client.post(CHAT_URL, json={"message": "Same question"})
     second = client.post(CHAT_URL, json={"message": "Same question"})
 
     assert first.json() == second.json()
 
 
-def test_surrounding_whitespace_is_stripped():
+def test_surrounding_whitespace_is_stripped(client):
     response = client.post(CHAT_URL, json={"message": "  Hello  "})
 
     assert response.status_code == 200
     assert response.json()["reply"] == "Mock response to: Hello"
 
 
-def test_message_at_max_length_is_accepted():
+def test_message_at_max_length_is_accepted(client):
     response = client.post(CHAT_URL, json={"message": "a" * MAX_MESSAGE_LENGTH})
 
     assert response.status_code == 200
@@ -62,14 +60,14 @@ def test_message_at_max_length_is_accepted():
         pytest.param({"message": "Hi", "extra": "x"}, id="unknown-field"),
     ],
 )
-def test_invalid_body_is_rejected(body):
+def test_invalid_body_is_rejected(body, client):
     response = client.post(CHAT_URL, json=body)
 
     assert response.status_code == 422
     assert "detail" in response.json()
 
 
-def test_malformed_json_is_rejected():
+def test_malformed_json_is_rejected(client):
     response = client.post(
         CHAT_URL,
         content='{"message": ',
@@ -79,7 +77,7 @@ def test_malformed_json_is_rejected():
     assert response.status_code == 422
 
 
-def test_route_delegates_to_injected_service():
+def test_route_delegates_to_injected_service(app, client):
     class FakeLLMService:
         async def generate(self, message: str) -> LLMResult:
             return LLMResult(
@@ -114,12 +112,15 @@ SECRET = "sk-super-secret-value"
         pytest.param(LLMProviderError(f"500 {SECRET}"), 502, PROVIDER_ERROR, id="provider"),
     ],
 )
-def test_provider_errors_map_to_safe_responses(error, expected_status, expected_detail):
+def test_provider_errors_map_to_safe_responses_and_logs(
+    error, expected_status, expected_detail, app, client, caplog
+):
     class FailingLLMService:
         async def generate(self, message: str) -> LLMResult:
             raise error
 
     app.dependency_overrides[get_llm_service] = FailingLLMService
+    caplog.set_level(logging.DEBUG, logger="app")
 
     response = client.post(CHAT_URL, json={"message": "hello"})
 
@@ -127,8 +128,15 @@ def test_provider_errors_map_to_safe_responses(error, expected_status, expected_
     assert response.json() == {"detail": expected_detail}
     assert SECRET not in response.text
 
+    # Logs carry controlled metadata only - never the exception message.
+    assert (
+        f"LLM request failed method=POST path={CHAT_URL} "
+        f"error={type(error).__name__} status_code={expected_status}"
+    ) in caplog.text
+    assert SECRET not in caplog.text
 
-def test_rate_limit_forwards_retry_after():
+
+def test_rate_limit_forwards_retry_after(app, client):
     class RateLimitedLLMService:
         async def generate(self, message: str) -> LLMResult:
             raise LLMRateLimitError("429", retry_after="20")
@@ -141,7 +149,7 @@ def test_rate_limit_forwards_retry_after():
     assert response.headers["retry-after"] == "20"
 
 
-def test_openapi_documents_chat_schemas():
+def test_openapi_documents_chat_schemas(client):
     spec = client.get("/openapi.json").json()
     operation = spec["paths"][CHAT_URL]["post"]
     schemas = spec["components"]["schemas"]

@@ -1,9 +1,8 @@
 import logging
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Protocol
 
-from app.config import Settings, get_settings
+from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +50,10 @@ class LLMService(Protocol):
 
     async def generate(self, message: str) -> LLMResult: ...
 
+    async def aclose(self) -> None:
+        """Release resources such as HTTP connection pools."""
+        ...
+
 
 class MockLLMService:
     """Deterministic stand-in for a real model. Makes no network calls."""
@@ -59,6 +62,9 @@ class MockLLMService:
 
     async def generate(self, message: str) -> LLMResult:
         return LLMResult(text=f"Mock response to: {message}", model=self.model_name)
+
+    async def aclose(self) -> None:
+        pass
 
 
 class UnconfiguredLLMService:
@@ -73,6 +79,9 @@ class UnconfiguredLLMService:
 
     async def generate(self, message: str) -> LLMResult:
         raise LLMConfigurationError(self.reason)
+
+    async def aclose(self) -> None:
+        pass
 
 
 def build_llm_service(settings: Settings) -> LLMService:
@@ -98,9 +107,3 @@ def build_llm_service(settings: Settings) -> LLMService:
         settings.llm_max_retries,
     )
     return OpenAILLMService.from_settings(settings)
-
-
-@lru_cache
-def get_llm_service() -> LLMService:
-    """FastAPI dependency that provides the shared LLM service."""
-    return build_llm_service(get_settings())

@@ -3,12 +3,10 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.exception_handlers import NOT_CONFIGURED
-from app.main import app
 from app.services.llm import (
     MockLLMService,
     UnconfiguredLLMService,
     build_llm_service,
-    get_llm_service,
 )
 from app.services.openai_llm import OpenAILLMService
 
@@ -84,13 +82,12 @@ def test_openai_without_required_config_is_unconfigured(api_key, model, missing)
     assert SECRET not in service.reason
 
 
-def test_unconfigured_provider_returns_safe_503_and_health_still_works():
-    settings = Settings(_env_file=None, llm_provider="openai", openai_model="some-model")
-    app.dependency_overrides[get_llm_service] = lambda: build_llm_service(settings)
-    client = TestClient(app)
+def test_unconfigured_provider_returns_safe_503_and_health_still_works(make_app):
+    app = make_app(llm_provider="openai", openai_model="some-model")
 
-    chat = client.post("/api/v1/chat", json={"message": "hello"})
-    health = client.get("/health")
+    with TestClient(app) as client:
+        chat = client.post("/api/v1/chat", json={"message": "hello"})
+        health = client.get("/health")
 
     assert chat.status_code == 503
     assert chat.json() == {"detail": NOT_CONFIGURED}

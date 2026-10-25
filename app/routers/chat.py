@@ -2,9 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.dependencies import get_llm_service
 from app.exception_handlers import BUSY, NOT_CONFIGURED, PROVIDER_ERROR, TIMED_OUT
 from app.schemas.chat import ChatRequest, ChatResponse, ErrorResponse, TokenUsage
-from app.services.llm import LLMService, get_llm_service
+from app.services.llm import LLMService
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 

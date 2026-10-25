@@ -29,14 +29,23 @@ backend locally.
 
 ## How the app works
 
-`app/main.py` creates the FastAPI application and registers the health and chat
-routers. `GET /health` returns `{"status": "healthy"}` and does not call any
-external service. `POST /api/v1/chat` validates the request and passes the
-message to the configured LLM service (see [Chat API](#chat-api)).
+`app/main.py` builds the FastAPI application in `create_app()` and registers the
+health and chat routers. `GET /health` returns `{"status": "healthy"}` and does
+not call any external service. `POST /api/v1/chat` validates the request and
+passes the message to the configured LLM service (see [Chat API](#chat-api)).
+
+The application owns its resources through FastAPI's *lifespan*: at startup it
+reads the settings, creates the LLM service and stores it on `app.state`; at
+shutdown it closes it (including the provider's HTTP connection pool). Routes
+receive the service through the `get_llm_service` dependency in
+`app/dependencies.py`. Future clients (databases, vector stores) follow the
+same pattern.
 
 The tests use FastAPI's `TestClient` to call the application without starting a
-separate server. They always use the mock model or a mocked HTTP transport, so
-they never make paid requests.
+separate server. Each test builds its own app with explicit settings through
+the fixtures in `tests/conftest.py`, so a local `.env` is never read during
+tests (a guard fails any test that tries). They always use the mock model or a
+mocked HTTP transport, so they never make paid requests.
 
 ## Requirements
 
@@ -123,7 +132,7 @@ error type, HTTP status and provider request ID.
 
 The route in `app/routers/chat.py` only validates input and delegates to an
 `LLMService` provided via FastAPI dependency injection (`get_llm_service` in
-`app/services/llm.py`). All OpenAI SDK code lives in
+`app/dependencies.py`). All OpenAI SDK code lives in
 `app/services/openai_llm.py`.
 
 ## Configuration
@@ -209,17 +218,19 @@ environment and can import the `app` package.
 
 ```text
 app/
-  main.py               # FastAPI app, lifespan, router and error-handler registration
+  main.py               # create_app(), lifespan (owns resources), router/error-handler registration
   config.py             # Settings loaded from env / .env (pydantic-settings)
+  dependencies.py       # FastAPI dependencies exposing app-owned resources (get_llm_service)
   logging_config.py     # Sends app.* logs to the terminal at LOG_LEVEL
-  exception_handlers.py # Maps LLM errors to safe HTTP responses
+  exception_handlers.py # Maps LLM errors to safe HTTP responses (logs metadata only)
   routers/health.py     # GET /health endpoint
   routers/chat.py       # POST /api/v1/chat endpoint
   schemas/chat.py       # Chat request/response models
   services/llm.py       # LLM interface, result/error types, mock, service factory
   services/openai_llm.py # OpenAI Responses API implementation
 tests/
-  conftest.py           # Forces the mock LLM in tests
+  conftest.py           # App/client fixtures with explicit settings; blocks reading .env
+  test_app_lifecycle.py # Lifespan: service creation, isolation, shutdown, overrides
   test_health.py        # Health-check test
   test_chat.py          # Chat API and error-mapping tests
   test_config.py        # Settings and provider-selection tests

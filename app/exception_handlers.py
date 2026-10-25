@@ -30,8 +30,13 @@ def _error_response(exc: LLMError) -> tuple[int, str]:
 
 async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
     status_code, detail = _error_response(exc)
-    # The internal message never leaves the server.
-    logger.error("LLM error on %s %s: %s", request.method, request.url.path, exc)
+    logger.warning(
+        "LLM request failed method=%s path=%s error=%s status_code=%s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        status_code,
+    )
 
     headers = {}
     if isinstance(exc, LLMRateLimitError) and exc.retry_after:
