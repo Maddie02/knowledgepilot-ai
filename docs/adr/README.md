@@ -11,6 +11,7 @@ Significant architectural decisions for KnowledgePilot AI, recorded as
 | [0002](0002-factories-and-application-lifecycle.md) | Factories and application lifecycle | Accepted |
 | [0003](0003-package-structure-and-dependency-rules.md) | Package structure and dependency rules | Accepted |
 | [0004](0004-testing-strategy.md) | Testing strategy | Accepted |
+| [0005](0005-streaming-chat-protocol.md) | Streaming chat protocol | Accepted |
 
 ## When to write an ADR
 
