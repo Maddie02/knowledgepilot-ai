@@ -73,10 +73,13 @@ def test_streams_mock_reply_as_deltas_then_done(client, caplog):
     assert all(name == "delta" for name, _ in deltas)
     assert "".join(data["text"] for _, data in deltas) == "Mock response to: Hello"
     assert last == ("done", {"model": "mock-llm", "usage": None})
-    assert "LLM stream ended outcome=completed deltas=4 error=None" in caplog.text
+    (summary,) = [r for r in caplog.records if "LLM stream ended" in r.getMessage()]
+    assert "outcome=completed deltas=4 error=None ttft_ms=" in summary.getMessage()
+    assert "total_ms=" in summary.getMessage()
 
 
-def test_done_event_carries_usage(app, client):
+def test_done_event_carries_usage(app, client, caplog):
+    caplog.set_level(logging.INFO, logger="app")
     app.dependency_overrides[get_llm_provider] = fake_provider(
         LLMTextDelta(text="Hi"),
         LLMStreamEnd(
@@ -95,6 +98,7 @@ def test_done_event_carries_usage(app, client):
             },
         ),
     ]
+    assert "input_tokens=3 output_tokens=2" in caplog.text
 
 
 def test_invalid_body_is_rejected_before_streaming(client):
@@ -224,3 +228,14 @@ async def test_cancelling_while_waiting_for_the_provider_propagates(caplog):
     assert received == ["delta"]
     assert provider.closed
     assert "LLM stream ended outcome=cancelled deltas=1 error=None" in caplog.text
+
+
+def test_stream_without_text_has_no_time_to_first_token(app, client, caplog):
+    caplog.set_level(logging.INFO, logger="app")
+    app.dependency_overrides[get_llm_provider] = fake_provider(
+        LLMStreamEnd(model="fake")
+    )
+
+    stream_events(client)
+
+    assert "deltas=0 error=LLMProviderError ttft_ms=None total_ms=" in caplog.text
