@@ -12,6 +12,7 @@ Significant architectural decisions for KnowledgePilot AI, recorded as
 | [0003](0003-package-structure-and-dependency-rules.md) | Package structure and dependency rules | Accepted |
 | [0004](0004-testing-strategy.md) | Testing strategy | Accepted |
 | [0005](0005-streaming-chat-protocol.md) | Streaming chat protocol | Accepted |
+| [0006](0006-request-correlation-and-latency-logging.md) | Request correlation and latency logging | Proposed |
 
 ## When to write an ADR
 

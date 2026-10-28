@@ -120,7 +120,8 @@ class LLMProvider(Protocol):
 One summary line per stream, with fixed fields only: `outcome` (`completed`, `cancelled`
 or `failed`), `ttft_ms` (time to first token), `total_ms`, number of deltas, token
 counts, and the error type on failure. Message and reply text are never logged.
-How logs are correlated with request IDs is a separate decision, in a follow-up ADR.
+How logs are correlated with request IDs is decided in
+[ADR-0006](0006-request-correlation-and-latency-logging.md).
 
 ## Why
 
