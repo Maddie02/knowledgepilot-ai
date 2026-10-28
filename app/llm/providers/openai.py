@@ -6,6 +6,7 @@ Python 3 imports are absolute, and this module's own name is `app.llm.providers.
 
 import logging
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from openai import (
@@ -27,7 +28,13 @@ from app.llm.errors import (
     LLMRateLimitError,
     LLMTimeoutError,
 )
-from app.llm.types import LLMResult, LLMUsage
+from app.llm.types import (
+    LLMResult,
+    LLMStreamEnd,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMUsage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +116,13 @@ class OpenAIProvider:
             usage.output_tokens if usage else None,
         )
         return LLMResult(text=text, model=self._model, usage=usage)
+
+    async def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]:
+        # Temporary (AI-004): sends the whole reply as one delta until real
+        # streaming via the Responses API is implemented.
+        result = await self.generate(message)
+        yield LLMTextDelta(text=result.text)
+        yield LLMStreamEnd(model=result.model, usage=result.usage)
 
     async def aclose(self) -> None:
         await self._client.close()

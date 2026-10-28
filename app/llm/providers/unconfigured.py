@@ -1,5 +1,7 @@
+from collections.abc import AsyncGenerator
+
 from app.llm.errors import LLMConfigurationError
-from app.llm.types import LLMResult
+from app.llm.types import LLMResult, LLMStreamEvent
 
 
 class UnconfiguredProvider:
@@ -14,6 +16,10 @@ class UnconfiguredProvider:
 
     async def generate(self, message: str) -> LLMResult:
         raise LLMConfigurationError(self.reason)
+
+    async def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]:
+        raise LLMConfigurationError(self.reason)
+        yield  # Unreachable, but makes this an async generator (see LLMProvider.stream).
 
     async def aclose(self) -> None:
         pass

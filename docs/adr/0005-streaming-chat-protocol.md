@@ -102,12 +102,14 @@ LLMStreamEvent = LLMTextDelta | LLMStreamEnd
 
 class LLMProvider(Protocol):
     async def generate(self, message: str) -> LLMResult: ...
-    def stream(self, message: str) -> AsyncIterator[LLMStreamEvent]: ...
+    def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]: ...
     async def aclose(self) -> None: ...
 ```
 
 - `stream` is declared with `def`, not `async def`. Calling an `async def` that contains
-  `yield` returns an async iterator directly, with no `await`.
+  `yield` returns an async generator directly, with no `await`.
+- The return type is `AsyncGenerator`, not `AsyncIterator`, so callers can `aclose()` the
+  stream to stop it early and run the provider's cleanup.
 - Providers yield zero or more non-empty `LLMTextDelta`, then exactly one `LLMStreamEnd`.
 - Failures are **raised** as the neutral `LLMError` subclasses. Providers never yield
   error values. The route turns them into `error` events.
