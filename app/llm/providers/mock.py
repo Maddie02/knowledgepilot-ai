@@ -15,7 +15,7 @@ class MockProvider:
 
     def __init__(self, chunk_delay: float = 0.0) -> None:
         """`chunk_delay` (seconds) slows the stream down so it can be watched."""
-        self._chunk_delay = chunk_delay
+        self.chunk_delay = chunk_delay
 
     async def generate(self, message: str) -> LLMResult:
         return LLMResult(text=self._reply(message), model=self.model_name)
@@ -23,7 +23,7 @@ class MockProvider:
     async def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]:
         for chunk in _CHUNK_PATTERN.findall(self._reply(message)):
             # Always await: it lets other tasks run and is where cancellation arrives.
-            await asyncio.sleep(self._chunk_delay)
+            await asyncio.sleep(self.chunk_delay)
             yield LLMTextDelta(text=chunk)
         yield LLMStreamEnd(model=self.model_name)
 

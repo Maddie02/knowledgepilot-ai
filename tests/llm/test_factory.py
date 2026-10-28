@@ -12,7 +12,19 @@ pytestmark = pytest.mark.usefixtures("clean_env")
 
 
 def test_mock_provider_is_the_default():
-    assert isinstance(build_llm_provider(Settings(_env_file=None)), MockProvider)
+    provider = build_llm_provider(Settings(_env_file=None))
+
+    assert isinstance(provider, MockProvider)
+    assert provider.chunk_delay == 0
+
+
+def test_mock_provider_gets_the_configured_chunk_delay():
+    settings = Settings(_env_file=None, mock_chunk_delay_seconds=0.5)
+
+    provider = build_llm_provider(settings)
+
+    assert isinstance(provider, MockProvider)
+    assert provider.chunk_delay == 0.5
 
 
 @pytest.mark.parametrize(

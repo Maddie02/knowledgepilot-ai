@@ -167,6 +167,7 @@ contain placeholders.
 | `LLM_SYSTEM_PROMPT` | built-in | System instructions sent with every request |
 | `LLM_TEMPERATURE` | provider default | Sampling temperature (0–2) |
 | `LLM_MAX_OUTPUT_TOKENS` | provider default | Upper limit on generated tokens |
+| `MOCK_CHUNK_DELAY_SECONDS` | `0` | Pause before each streamed chunk of the `mock` provider, to watch or interrupt a stream |
 | `LOG_LEVEL` | `INFO` | Minimum level for application logs (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 To use OpenAI, set `LLM_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL`,
