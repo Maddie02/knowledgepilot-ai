@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from typing import Annotated
@@ -105,6 +106,10 @@ async def chat_stream(
     outcome = "cancelled"
     error: str | None = None
     deltas = 0
+    started = time.perf_counter()
+    # Time to first token: how long the user waits before seeing anything.
+    ttft_ms: float | None = None
+    final_usage: LLMUsage | None = None
     try:
         # `aclosing` closes the provider stream as soon as we stop, for any reason.
         # A bare `async for` would leave it open until garbage collection.
@@ -112,12 +117,15 @@ async def chat_stream(
             async for event in events:
                 match event:
                     case LLMTextDelta(text=text):
+                        if ttft_ms is None:
+                            ttft_ms = (time.perf_counter() - started) * 1000
                         deltas += 1
                         yield ServerSentEvent(
                             event="delta", data=StreamDelta(text=text)
                         )
 
                     case LLMStreamEnd(model=model, usage=usage):
+                        final_usage = usage
                         if deltas == 0:
                             raise LLMProviderError(
                                 "Provider returned an empty response"
@@ -144,10 +152,15 @@ async def chat_stream(
         # exception messages (they are free text and may contain secrets).
         logger.log(
             logging.WARNING if outcome == "failed" else logging.INFO,
-            "LLM stream ended outcome=%s deltas=%d error=%s",
+            "LLM stream ended outcome=%s deltas=%d error=%s ttft_ms=%s total_ms=%.0f "
+            "input_tokens=%s output_tokens=%s",
             outcome,
             deltas,
             error,
+            None if ttft_ms is None else round(ttft_ms),
+            (time.perf_counter() - started) * 1000,
+            final_usage.input_tokens if final_usage else None,
+            final_usage.output_tokens if final_usage else None,
         )
 
 

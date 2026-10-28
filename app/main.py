@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.exception_handlers import register_exception_handlers
+from app.api.middleware import RequestContextMiddleware
 from app.api.routers.chat import router as chat_router
 from app.api.routers.health import router as health_router
 from app.core.config import Settings, get_settings
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.llm_provider.aclose()
 
     app = FastAPI(title="KnowledgePilot AI", lifespan=lifespan)
+    app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(chat_router)
