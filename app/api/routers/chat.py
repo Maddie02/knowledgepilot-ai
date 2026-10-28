@@ -1,5 +1,6 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -97,32 +98,57 @@ async def chat(
 async def chat_stream(
     request: ChatRequest,
     llm: Annotated[LLMProvider, Depends(get_llm_provider)],
-) -> AsyncIterator[ServerSentEvent]:
-    received_text = False
+) -> AsyncGenerator[ServerSentEvent]:
+    # Stays "cancelled" unless the stream completes or fails: if the client
+    # disconnects, the generator is stopped at an `await` or `yield` and only
+    # the `finally` block runs.
+    outcome = "cancelled"
+    error: str | None = None
+    deltas = 0
     try:
-        async for event in llm.stream(request.message):
-            match event:
-                case LLMTextDelta(text=text):
-                    received_text = True
-                    yield ServerSentEvent(event="delta", data=StreamDelta(text=text))
+        # `aclosing` closes the provider stream as soon as we stop, for any reason.
+        # A bare `async for` would leave it open until garbage collection.
+        async with aclosing(llm.stream(request.message)) as events:
+            async for event in events:
+                match event:
+                    case LLMTextDelta(text=text):
+                        deltas += 1
+                        yield ServerSentEvent(
+                            event="delta", data=StreamDelta(text=text)
+                        )
 
-                case LLMStreamEnd(model=model, usage=usage):
-                    if not received_text:
-                        raise LLMProviderError("Provider returned an empty response")
+                    case LLMStreamEnd(model=model, usage=usage):
+                        if deltas == 0:
+                            raise LLMProviderError(
+                                "Provider returned an empty response"
+                            )
 
-                    yield ServerSentEvent(
-                        event="done",
-                        data=StreamDone(model=model, usage=_token_usage(usage)),
-                    )
+                        yield ServerSentEvent(
+                            event="done",
+                            data=StreamDone(model=model, usage=_token_usage(usage)),
+                        )
+                        outcome = "completed"
 
     except LLMError as exc:
+        outcome, error = "failed", type(exc).__name__
         _, detail = llm_error_response(exc)
-        logger.warning("LLM stream failed error=%s", type(exc).__name__)
         yield ServerSentEvent(event="error", data=ErrorResponse(detail=detail))
 
-    except Exception:
+    except Exception as exc:
+        outcome, error = "failed", type(exc).__name__
         logger.exception("Unexpected error while streaming a chat reply")
         yield ServerSentEvent(event="error", data=ErrorResponse(detail=INTERNAL_ERROR))
+
+    finally:
+        # One summary line per stream. Fixed fields only: never message text or
+        # exception messages (they are free text and may contain secrets).
+        logger.log(
+            logging.WARNING if outcome == "failed" else logging.INFO,
+            "LLM stream ended outcome=%s deltas=%d error=%s",
+            outcome,
+            deltas,
+            error,
+        )
 
 
 def _token_usage(usage: LLMUsage | None) -> TokenUsage | None:
