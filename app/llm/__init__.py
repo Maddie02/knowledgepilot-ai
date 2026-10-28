@@ -16,7 +16,14 @@ from app.llm.errors import (
     LLMTimeoutError,
 )
 from app.llm.factory import build_llm_provider
-from app.llm.types import LLMProvider, LLMResult, LLMUsage
+from app.llm.types import (
+    LLMProvider,
+    LLMResult,
+    LLMStreamEnd,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMUsage,
+)
 
 __all__ = [
     "LLMConfigurationError",
@@ -25,6 +32,9 @@ __all__ = [
     "LLMProviderError",
     "LLMRateLimitError",
     "LLMResult",
+    "LLMStreamEnd",
+    "LLMStreamEvent",
+    "LLMTextDelta",
     "LLMTimeoutError",
     "LLMUsage",
     "build_llm_provider",

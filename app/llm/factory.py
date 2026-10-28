@@ -13,8 +13,10 @@ logger = logging.getLogger(__name__)
 
 def build_llm_provider(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "mock":
-        logger.info("Using LLM provider=mock")
-        return MockProvider()
+        logger.info(
+            "Using LLM provider=mock chunk_delay=%ss", settings.mock_chunk_delay_seconds
+        )
+        return MockProvider(chunk_delay=settings.mock_chunk_delay_seconds)
 
     api_key = (
         settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""

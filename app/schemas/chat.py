@@ -52,3 +52,25 @@ class ErrorResponse(BaseModel):
         description="Safe, human-readable error message.",
         examples=["LLM provider timed out"],
     )
+
+
+class StreamDelta(BaseModel):
+    """Payload of a `delta` event: the next piece of the reply."""
+
+    text: str = Field(
+        description="The next piece of the reply. Never empty",
+        min_length=1,
+    )
+
+
+class StreamDone(BaseModel):
+    """Payload of the `done` event: the stream finished successfully."""
+
+    model: str = Field(
+        description="Configured identifier of the model that produced the reply.",
+        examples=["mock-llm"],
+    )
+    usage: TokenUsage | None = Field(
+        default=None,
+        description="Token usage reported by the provider; null when not available.",
+    )

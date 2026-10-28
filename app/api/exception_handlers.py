@@ -16,15 +16,21 @@ NOT_CONFIGURED = "LLM provider is not configured"
 TIMED_OUT = "LLM provider timed out"
 BUSY = "LLM provider is busy, try again later"
 PROVIDER_ERROR = "LLM provider error"
+INTERNAL_ERROR = "Internal server error"
 
 
-def _error_response(exc: LLMError) -> tuple[int, str]:
+def llm_error_response(exc: LLMError) -> tuple[int, str]:
+    """Map an LLM error to an HTTP status and a safe message for clients."""
+
     if isinstance(exc, LLMConfigurationError):
         return status.HTTP_503_SERVICE_UNAVAILABLE, NOT_CONFIGURED
+
     if isinstance(exc, LLMTimeoutError):
         return status.HTTP_504_GATEWAY_TIMEOUT, TIMED_OUT
+
     if isinstance(exc, LLMRateLimitError):
         return status.HTTP_503_SERVICE_UNAVAILABLE, BUSY
+
     return status.HTTP_502_BAD_GATEWAY, PROVIDER_ERROR
 
 
@@ -34,7 +40,7 @@ async def llm_error_handler(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, LLMError):
         raise exc
 
-    status_code, detail = _error_response(exc)
+    status_code, detail = llm_error_response(exc)
     # Fixed fields only: never log the exception message (it is free text).
     logger.warning(
         "LLM request failed method=%s path=%s error=%s status_code=%s",

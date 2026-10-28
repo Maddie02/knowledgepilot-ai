@@ -6,6 +6,7 @@ Python 3 imports are absolute, and this module's own name is `app.llm.providers.
 
 import logging
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from openai import (
@@ -18,6 +19,14 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
 )
+from openai.types.responses import (
+    Response,
+    ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
+    ResponseIncompleteEvent,
+    ResponseTextDeltaEvent,
+)
 
 from app.core.config import Settings
 from app.llm.errors import (
@@ -27,7 +36,13 @@ from app.llm.errors import (
     LLMRateLimitError,
     LLMTimeoutError,
 )
-from app.llm.types import LLMResult, LLMUsage
+from app.llm.types import (
+    LLMResult,
+    LLMStreamEnd,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMUsage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,19 +84,11 @@ class OpenAIProvider:
         )
 
     async def generate(self, message: str) -> LLMResult:
-        params: dict[str, Any] = {
-            "model": self._model,
-            "instructions": self._system_prompt,
-            "input": message,
-        }
-        if self._temperature is not None:
-            params["temperature"] = self._temperature
-        if self._max_output_tokens is not None:
-            params["max_output_tokens"] = self._max_output_tokens
-
         started = time.perf_counter()
         try:
-            response = await self._client.responses.create(**params)
+            response = await self._client.responses.create(
+                **self._request_params(message)
+            )
         except OpenAIError as exc:
             raise self._translate_error(exc) from None
         latency_ms = (time.perf_counter() - started) * 1000
@@ -93,14 +100,7 @@ class OpenAIProvider:
             )
             raise LLMProviderError("Provider returned an empty response")
 
-        usage = None
-        if response.usage is not None:
-            usage = LLMUsage(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.total_tokens,
-            )
-
+        usage = self._usage(response)
         logger.info(
             "LLM request completed model=%s latency_ms=%.0f input_tokens=%s output_tokens=%s",
             self._model,
@@ -110,8 +110,78 @@ class OpenAIProvider:
         )
         return LLMResult(text=text, model=self._model, usage=usage)
 
+    async def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]:
+        """Stream the reply using the Responses API with `stream=True`.
+
+        OpenAI sends many event types; only text deltas and the final status
+        matter here. Everything else (output items, content parts, ...) is skipped.
+        """
+        try:
+            # Sends the request and waits for the response headers only. HTTP
+            # errors (401, 429, 5xx...) are raised here, before any event.
+            events = await self._client.responses.create(
+                **self._request_params(message), stream=True
+            )
+            # `async with` closes the HTTP response when we stop early, e.g.
+            # when our caller closes this generator because the client left.
+            async with events:
+                async for event in events:
+                    if isinstance(event, ResponseTextDeltaEvent):
+                        if event.delta:
+                            yield LLMTextDelta(text=event.delta)
+
+                    elif isinstance(
+                        event, (ResponseCompletedEvent, ResponseIncompleteEvent)
+                    ):
+                        if isinstance(event, ResponseIncompleteEvent):
+                            details = event.response.incomplete_details
+                            logger.warning(
+                                "LLM stream incomplete reason=%s",
+                                details.reason if details else None,
+                            )
+
+                        yield LLMStreamEnd(
+                            model=self._model, usage=self._usage(event.response)
+                        )
+
+                        return
+
+                    elif isinstance(event, (ResponseFailedEvent, ResponseErrorEvent)):
+                        # Only the event type is logged: error messages are free text.
+                        logger.warning("LLM stream failed event=%s", event.type)
+                        raise LLMProviderError(f"Provider stream failed ({event.type})")
+
+        except OpenAIError as exc:
+            # Timeouts and dropped connections mid-stream also arrive as SDK errors.
+            raise self._translate_error(exc) from None
+
+        # The connection closed without a final status event: the reply is cut off.
+        raise LLMProviderError("Provider stream ended without a final event")
+
     async def aclose(self) -> None:
         await self._client.close()
+
+    def _request_params(self, message: str) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "model": self._model,
+            "instructions": self._system_prompt,
+            "input": message,
+        }
+        if self._temperature is not None:
+            params["temperature"] = self._temperature
+        if self._max_output_tokens is not None:
+            params["max_output_tokens"] = self._max_output_tokens
+        return params
+
+    @staticmethod
+    def _usage(response: Response) -> LLMUsage | None:
+        if response.usage is None:
+            return None
+        return LLMUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            total_tokens=response.usage.total_tokens,
+        )
 
     @staticmethod
     def _translate_error(exc: OpenAIError) -> LLMError:

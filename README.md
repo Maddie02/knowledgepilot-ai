@@ -138,6 +138,60 @@ error type, HTTP status and provider request ID.
 | Provider did not respond within the timeout | `504` | `LLM provider timed out` |
 | Any other provider or connection error | `502` | `LLM provider error` |
 
+### Streaming
+
+`POST /api/v1/chat/stream` takes the same body and sends the reply piece by piece
+as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html)
+while the model generates it. Use `curl -N` so curl prints events as they arrive:
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is our vacation policy?"}'
+```
+
+```text
+event: delta
+data: {"text":"Mock "}
+
+event: delta
+data: {"text":"response "}
+
+...
+
+event: done
+data: {"model":"mock-llm","usage":null}
+```
+
+- `delta` events carry the next piece of text; join them to get the reply.
+- The stream ends with exactly one `done` (model and usage) or `error`
+  (`{"detail": ...}`, same messages as the table above).
+- LLM failures are sent as an `error` event, so a `200` stream can still fail.
+  Only validation errors (`422`) are HTTP errors.
+- A stream that ends without `done` or `error` was cut off.
+- If the client disconnects, the server stops the provider request.
+
+Browsers' `EventSource` only supports `GET`; read this endpoint with `fetch()`
+and a `ReadableStream`. The design is recorded in
+[ADR-0005](docs/adr/0005-streaming-chat-protocol.md). To watch the mock stream
+slowly, set `MOCK_CHUNK_DELAY_SECONDS` (see [Configuration](#configuration)).
+
+### Request IDs and logs
+
+Every response has an `X-Request-ID` header. Send your own (letters, digits,
+`.`, `_`, `-`, up to 64 characters) to correlate with your logs; otherwise the
+server generates one. Every application log line written while handling the
+request includes it, and each request ends with a line containing its duration:
+
+```text
+INFO      app.api.routers.chat [9f2c...] - LLM stream ended outcome=completed deltas=29 error=None ttft_ms=412 total_ms=950 input_tokens=57 output_tokens=30
+INFO      app.api.middleware [9f2c...] - HTTP request method=POST path=/api/v1/chat/stream status=200 duration_ms=951
+```
+
+`ttft_ms` is the time to the first piece of text. Logs never contain message or
+reply text, query strings or credentials. See
+[ADR-0006](docs/adr/0006-request-correlation-and-latency-logging.md).
+
 The route in `app/api/routers/chat.py` only validates input and delegates to an
 `LLMProvider` supplied via FastAPI dependency injection (`get_llm_provider` in
 `app/api/dependencies.py`). All OpenAI SDK code lives in
@@ -167,6 +221,7 @@ contain placeholders.
 | `LLM_SYSTEM_PROMPT` | built-in | System instructions sent with every request |
 | `LLM_TEMPERATURE` | provider default | Sampling temperature (0–2) |
 | `LLM_MAX_OUTPUT_TOKENS` | provider default | Upper limit on generated tokens |
+| `MOCK_CHUNK_DELAY_SECONDS` | `0` | Pause before each streamed chunk of the `mock` provider, to watch or interrupt a stream |
 | `LOG_LEVEL` | `INFO` | Minimum level for application logs (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 To use OpenAI, set `LLM_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL`,
@@ -255,7 +310,7 @@ app/
     exception_handlers.py    #   Maps LLM errors to safe HTTP responses (logs metadata only)
     routers/
       health.py              #   GET /health
-      chat.py                #   POST /api/v1/chat
+      chat.py                #   POST /api/v1/chat and /api/v1/chat/stream
   schemas/
     chat.py                  # Request/response models (DTOs)
   llm/                       # LLM integration

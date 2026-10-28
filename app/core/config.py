@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     llm_temperature: float | None = Field(default=None, ge=0, le=2)
     llm_max_output_tokens: int | None = Field(default=None, gt=0)
 
+    mock_chunk_delay_seconds: float = Field(
+        default=0.0,
+        ge=0,
+        description="Pause before each streamed mock chunk, to watch or interrupt it.",
+    )
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",
         description="Minimum level for application logs (`app.*` loggers).",

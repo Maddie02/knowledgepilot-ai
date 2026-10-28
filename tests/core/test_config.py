@@ -48,6 +48,7 @@ def test_api_key_is_masked_in_repr_and_serialisation():
         {"llm_temperature": 3},
         {"llm_max_output_tokens": 0},
         {"log_level": "LOUD"},
+        {"mock_chunk_delay_seconds": -1},
     ],
 )
 def test_invalid_settings_are_rejected(overrides):

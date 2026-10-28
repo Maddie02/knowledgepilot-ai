@@ -17,10 +17,13 @@ from app.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRateLimitError,
+    LLMStreamEnd,
+    LLMTextDelta,
     LLMTimeoutError,
     LLMUsage,
 )
 from app.llm.providers.openai import OpenAIProvider
+from tests.llm.stream_utils import collect_stream
 
 pytestmark = pytest.mark.anyio
 
@@ -219,3 +222,186 @@ async def test_from_settings_applies_timeout_retries_and_base_url():
         assert str(service._client.base_url).startswith("https://llm.example.com/v1")
     finally:
         await service.aclose()
+
+
+async def test_stream_raises_translated_errors_on_first_read():
+    provider = make_provider(error_handler(429))
+    stream = provider.stream("Hi")
+
+    with pytest.raises(LLMRateLimitError):
+        await anext(stream)
+
+
+# --- Streaming -------------------------------------------------------------
+# OpenAI streams Server-Sent Events, just like our own endpoint. These helpers
+# build such a body so the real SDK parses it, without any network call.
+
+
+def sse_body(*events: dict[str, Any]) -> bytes:
+    return b"".join(
+        f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode()
+        for event in events
+    )
+
+
+def text_delta(text: str) -> dict[str, Any]:
+    return {
+        "type": "response.output_text.delta",
+        "item_id": "msg_123",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": text,
+        "logprobs": [],
+        "sequence_number": 1,
+    }
+
+
+def final_event(event_type: str, **response_fields: Any) -> dict[str, Any]:
+    """`response.completed` / `.incomplete` / `.failed` with a full response."""
+    return {
+        "type": event_type,
+        "response": {**response_body(usage=USAGE), **response_fields},
+        "sequence_number": 99,
+    }
+
+
+def stream_handler(*events: dict[str, Any], requests: list[Any] | None = None):
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if requests is not None:
+            requests.append(request)
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=sse_body(*events),
+        )
+
+    return handler
+
+
+async def test_stream_yields_text_deltas_then_end_with_usage():
+    requests: list[httpx2.Request] = []
+    provider = make_provider(
+        stream_handler(
+            {"type": "response.created", "sequence_number": 0},  # ignored
+            text_delta("Hello"),
+            text_delta(""),  # empty deltas are skipped
+            text_delta(" there"),
+            final_event("response.completed"),
+            requests=requests,
+        )
+    )
+
+    texts, end = await collect_stream(provider.stream("Hi"))
+
+    assert texts == ["Hello", " there"]
+    assert end == LLMStreamEnd(
+        model=MODEL,
+        usage=LLMUsage(input_tokens=12, output_tokens=5, total_tokens=17),
+    )
+    (request,) = requests
+    assert json.loads(request.content) == {
+        "model": MODEL,
+        "instructions": SYSTEM_PROMPT,
+        "input": "Hi",
+        "stream": True,
+    }
+
+
+async def test_incomplete_stream_still_ends_normally(caplog):
+    caplog.set_level(logging.WARNING, logger="app")
+    provider = make_provider(
+        stream_handler(
+            text_delta("Partial"),
+            final_event(
+                "response.incomplete",
+                status="incomplete",
+                incomplete_details={"reason": "max_output_tokens"},
+            ),
+        )
+    )
+
+    texts, end = await collect_stream(provider.stream("Hi"))
+
+    assert texts == ["Partial"]
+    assert end.model == MODEL
+    assert "LLM stream incomplete reason=max_output_tokens" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(
+            final_event(
+                "response.failed",
+                status="failed",
+                error={"code": "server_error", "message": f"boom {API_KEY}"},
+            ),
+            id="response.failed",
+        ),
+        pytest.param(
+            {
+                "type": "error",
+                "code": "server_error",
+                "message": f"boom {API_KEY}",
+                "param": None,
+                "sequence_number": 2,
+            },
+            id="error",
+        ),
+    ],
+)
+async def test_failure_event_mid_stream_raises_provider_error(failure, caplog):
+    caplog.set_level(logging.DEBUG, logger="app")
+    stream = make_provider(stream_handler(text_delta("Partial"), failure)).stream("Hi")
+
+    assert await anext(stream) == LLMTextDelta(text="Partial")
+    with pytest.raises(LLMProviderError) as exc_info:
+        await anext(stream)
+
+    assert f"event={failure['type']}" in caplog.text
+    assert API_KEY not in caplog.text
+    assert API_KEY not in str(exc_info.value)
+
+
+async def test_stream_cut_off_without_final_event_raises_provider_error():
+    stream = make_provider(stream_handler(text_delta("Partial"))).stream("Hi")
+
+    assert await anext(stream) == LLMTextDelta(text="Partial")
+    with pytest.raises(LLMProviderError):
+        await anext(stream)
+
+
+async def test_timeout_mid_stream_maps_to_timeout_error():
+    class TimesOutAfterOneEvent(httpx2.AsyncByteStream):
+        async def __aiter__(self):
+            yield sse_body(text_delta("Partial"))
+            raise httpx2.ReadTimeout("timed out")
+
+    provider = make_provider(
+        lambda request: httpx2.Response(200, stream=TimesOutAfterOneEvent())
+    )
+    stream = provider.stream("Hi")
+
+    assert await anext(stream) == LLMTextDelta(text="Partial")
+    with pytest.raises(LLMTimeoutError):
+        await anext(stream)
+
+
+async def test_closing_the_stream_early_closes_the_http_response():
+    class TrackedBody(httpx2.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield sse_body(text_delta("Hello"), text_delta(" there"))
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    body = TrackedBody()
+    provider = make_provider(lambda request: httpx2.Response(200, stream=body))
+    stream = provider.stream("Hi")
+
+    await anext(stream)
+    await stream.aclose()  # what our route does when the client disconnects
+
+    assert body.closed
