@@ -1,8 +1,10 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import get_llm_provider
@@ -12,13 +14,16 @@ from app.api.exception_handlers import (
     PROVIDER_ERROR,
     TIMED_OUT,
 )
+from app.api.routers.chat import chat_stream
 from app.llm import (
+    LLMResult,
     LLMStreamEnd,
     LLMStreamEvent,
     LLMTextDelta,
     LLMTimeoutError,
     LLMUsage,
 )
+from app.schemas.chat import ChatRequest
 
 STREAM_URL = "/api/v1/chat/stream"
 SECRET = "sk-super-secret-value"
@@ -58,7 +63,9 @@ def fake_provider(*events: LLMStreamEvent, error: Exception | None = None):
     return FakeProvider
 
 
-def test_streams_mock_reply_as_deltas_then_done(client):
+def test_streams_mock_reply_as_deltas_then_done(client, caplog):
+    caplog.set_level(logging.INFO, logger="app")
+
     events = stream_events(client, "Hello")
 
     *deltas, last = events
@@ -66,6 +73,7 @@ def test_streams_mock_reply_as_deltas_then_done(client):
     assert all(name == "delta" for name, _ in deltas)
     assert "".join(data["text"] for _, data in deltas) == "Mock response to: Hello"
     assert last == ("done", {"model": "mock-llm", "usage": None})
+    assert "LLM stream ended outcome=completed deltas=4 error=None" in caplog.text
 
 
 def test_done_event_carries_usage(app, client):
@@ -118,7 +126,9 @@ def test_mid_stream_failure_keeps_deltas_and_ends_with_error(app, client, caplog
         ("delta", {"text": "Partial "}),
         ("error", {"detail": TIMED_OUT}),
     ]
-    assert "LLM stream failed error=LLMTimeoutError" in caplog.text
+    assert "LLM stream ended outcome=failed deltas=1 error=LLMTimeoutError" in (
+        caplog.text
+    )
     assert SECRET not in response.text
     assert SECRET not in caplog.text
 
@@ -152,3 +162,65 @@ def test_openapi_documents_stream_endpoint(client):
     }
     assert "text/event-stream" in operation["responses"]["200"]["content"]
     assert "422" in operation["responses"]
+
+
+class EndlessProvider:
+    """Streams one delta, then waits forever, like a slow model. Records cleanup."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def stream(self, message: str) -> AsyncGenerator[LLMStreamEvent]:
+        try:
+            yield LLMTextDelta(text="Partial ")
+            await asyncio.Event().wait()  # never set
+            yield LLMStreamEnd(model="never")  # pragma: no cover
+        finally:
+            self.closed = True
+
+    async def generate(self, message: str) -> LLMResult:  # pragma: no cover
+        raise AssertionError("not used by the streaming route")
+
+    async def aclose(self) -> None:  # pragma: no cover
+        pass
+
+
+# The tests below drive the route generator directly: that is what FastAPI does,
+# and it lets us stop it exactly where a client disconnect would.
+
+
+@pytest.mark.anyio
+async def test_closing_the_stream_closes_the_provider_and_logs_cancelled(caplog):
+    caplog.set_level(logging.INFO, logger="app")
+    provider = EndlessProvider()
+    stream = chat_stream(ChatRequest(message="Hi"), provider)
+
+    first = await anext(stream)
+    await stream.aclose()  # what happens to a stream paused at `yield`
+
+    assert first.event == "delta"
+    assert provider.closed  # immediately, not at garbage collection
+    assert "LLM stream ended outcome=cancelled deltas=1 error=None" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_cancelling_while_waiting_for_the_provider_propagates(caplog):
+    caplog.set_level(logging.INFO, logger="app")
+    provider = EndlessProvider()
+    received = []
+
+    async def consume() -> None:
+        async for event in chat_stream(ChatRequest(message="Hi"), provider):
+            received.append(event.event)
+
+    task = asyncio.create_task(consume())
+    while not received:  # wait until the first delta arrived
+        await asyncio.sleep(0)
+    task.cancel()  # what a client disconnect does to the task running the stream
+
+    with pytest.raises(asyncio.CancelledError):
+        await task  # re-raised, not swallowed or turned into an `error` event
+
+    assert received == ["delta"]
+    assert provider.closed
+    assert "LLM stream ended outcome=cancelled deltas=1 error=None" in caplog.text
