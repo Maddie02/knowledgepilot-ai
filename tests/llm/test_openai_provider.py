@@ -17,10 +17,12 @@ from app.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRateLimitError,
+    LLMStreamEnd,
     LLMTimeoutError,
     LLMUsage,
 )
 from app.llm.providers.openai import OpenAIProvider
+from tests.llm.stream_utils import collect_stream
 
 pytestmark = pytest.mark.anyio
 
@@ -219,3 +221,25 @@ async def test_from_settings_applies_timeout_retries_and_base_url():
         assert str(service._client.base_url).startswith("https://llm.example.com/v1")
     finally:
         await service.aclose()
+
+
+async def test_stream_sends_the_whole_reply_as_one_delta():
+    provider = make_provider(
+        lambda request: httpx2.Response(200, json=response_body(usage=USAGE))
+    )
+
+    texts, end = await collect_stream(provider.stream("Hi"))
+
+    assert texts == ["Hello there"]
+    assert end == LLMStreamEnd(
+        model=MODEL,
+        usage=LLMUsage(input_tokens=12, output_tokens=5, total_tokens=17),
+    )
+
+
+async def test_stream_raises_translated_errors_on_first_read():
+    provider = make_provider(error_handler(429))
+    stream = provider.stream("Hi")
+
+    with pytest.raises(LLMRateLimitError):
+        await anext(stream)
