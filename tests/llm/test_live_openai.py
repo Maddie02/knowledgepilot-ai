@@ -8,6 +8,7 @@ import pytest
 
 from app.core.config import Settings
 from app.llm.providers.openai import OpenAIProvider
+from tests.llm.stream_utils import collect_stream
 
 pytestmark = [pytest.mark.live, pytest.mark.anyio]
 
@@ -32,3 +33,20 @@ async def test_real_provider_returns_text_and_usage():
     assert result.text.strip()
     assert result.model == settings.openai_model
     assert result.usage is None or result.usage.total_tokens > 0
+
+
+@pytest.mark.skipif(
+    not has_credentials, reason="OPENAI_API_KEY and OPENAI_MODEL not set"
+)
+async def test_real_provider_streams_deltas_then_end():
+    service = OpenAIProvider.from_settings(settings)
+    try:
+        texts, end = await collect_stream(
+            service.stream("Count from 1 to 5 in words, comma separated.")
+        )
+
+    finally:
+        await service.aclose()
+
+    assert len(texts) > 1  # really streamed, not one chunk
+    assert end.model == settings.openai_model
