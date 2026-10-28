@@ -176,6 +176,22 @@ and a `ReadableStream`. The design is recorded in
 [ADR-0005](docs/adr/0005-streaming-chat-protocol.md). To watch the mock stream
 slowly, set `MOCK_CHUNK_DELAY_SECONDS` (see [Configuration](#configuration)).
 
+### Request IDs and logs
+
+Every response has an `X-Request-ID` header. Send your own (letters, digits,
+`.`, `_`, `-`, up to 64 characters) to correlate with your logs; otherwise the
+server generates one. Every application log line written while handling the
+request includes it, and each request ends with a line containing its duration:
+
+```text
+INFO      app.api.routers.chat [9f2c...] - LLM stream ended outcome=completed deltas=29 error=None ttft_ms=412 total_ms=950 input_tokens=57 output_tokens=30
+INFO      app.api.middleware [9f2c...] - HTTP request method=POST path=/api/v1/chat/stream status=200 duration_ms=951
+```
+
+`ttft_ms` is the time to the first piece of text. Logs never contain message or
+reply text, query strings or credentials. See
+[ADR-0006](docs/adr/0006-request-correlation-and-latency-logging.md).
+
 The route in `app/api/routers/chat.py` only validates input and delegates to an
 `LLMProvider` supplied via FastAPI dependency injection (`get_llm_provider` in
 `app/api/dependencies.py`). All OpenAI SDK code lives in
